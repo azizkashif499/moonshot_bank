@@ -2079,7 +2079,7 @@ if (require.main === module) {
   assertAdaptersConfigured();
   installProcessHandlers();
   app.listen(PORT, () => {
-    console.log(`Stellar Moonshot Bank API running on http://localhost:${PORT}`);
+    console.log(`Stellar Scope API running on http://localhost:${PORT}`);
     console.log(`Dashboard: http://localhost:${PORT}`);
     console.log(`[history-db] Using database at ${historyDb.DB_PATH}`);
     startBackgroundWork();
