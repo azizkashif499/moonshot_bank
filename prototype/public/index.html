@@ -131,8 +131,10 @@
           ${short}
           <svg class="wallet-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;margin-left:2px;opacity:0.7"><polyline points="6 9 12 15 18 9"></polyline></svg>
         `;
-        // Swap the onclick from connect-modal to open-account-menu now that
-        // there IS a connected account to manage.
+        // Open the account menu instead of the connect modal now that there IS
+        // a connected account to manage. The button's data-action still says
+        // connect-wallet-modal, so this must stop the click before it bubbles
+        // to the delegated listener.
         header.onclick = (e) => { e.stopPropagation(); toggleWalletMenu(address); };
       }
 
@@ -159,7 +161,11 @@
           </svg>
           Connect Wallet
         `;
-        header.onclick = () => connectWalletViaModal();
+        // Back to the default: the button's data-action="connect-wallet-modal"
+        // opens the modal through the delegated listener. Assigning a handler
+        // here would run alongside it and open the modal twice (it used to
+        // replace an inline onclick, which shares the same slot).
+        header.onclick = null;
       }
       const hero = document.getElementById("heroWalletBtn");
       if (hero) {
@@ -3161,20 +3167,20 @@
   </div>
 
   <div class="header">
-    <div class="logo" onclick="goHome()" style="cursor:pointer;" title="Back to home">
+    <div class="logo" data-action="go-home" style="cursor:pointer;" title="Back to home">
       <img src="/stellar-mark.png" alt="Stellar" class="stellar-mark" style="width:30px;height:30px;" />
       Stellar Scope <span style="font-size:0.62em;font-weight:500;color:var(--text-muted);letter-spacing:0.02em;">(beta)</span>
     </div>
     <div class="search-container">
       <div class="search-box">
         <input type="text" id="addressInput" placeholder="Enter Stellar address (G...)" spellcheck="false" />
-        <button class="btn" id="searchBtn" onclick="loadPortfolio()">Look Up</button>
-        <button class="btn btn-secondary" id="addToPortfolioBtn" onclick="addCurrentToPortfolio()" title="Add this address to your portfolio" style="padding: 12px 14px; font-size: 13px;">+ Save</button>
+        <button class="btn" id="searchBtn" data-action="load-portfolio">Look Up</button>
+        <button class="btn btn-secondary" id="addToPortfolioBtn" data-action="add-current-to-portfolio" title="Add this address to your portfolio" style="padding: 12px 14px; font-size: 13px;">+ Save</button>
       </div>
     </div>
     <div class="header-right">
-      <button class="btn btn-secondary" onclick="enterPortfolioMode()" style="font-size:13px; padding: 10px 18px;">My Portfolio</button>
-      <button class="wallet-btn" id="headerWalletBtn" onclick="connectWalletViaModal()">
+      <button class="btn btn-secondary" data-action="enter-portfolio-mode" style="font-size:13px; padding: 10px 18px;">My Portfolio</button>
+      <button class="wallet-btn" id="headerWalletBtn" data-action="connect-wallet-modal">
         <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="2" y="6" width="20" height="12" rx="2"></rect>
           <path d="M22 10H2"></path>
@@ -3182,7 +3188,7 @@
         </svg>
         Connect Wallet
       </button>
-      <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light / dark theme" aria-label="Toggle theme">
+      <button class="theme-toggle" id="themeToggle" data-action="toggle-theme" title="Toggle light / dark theme" aria-label="Toggle theme">
         <!-- Sun icon: shown in dark mode (clicking switches TO light) -->
         <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="4"></circle>
@@ -3206,11 +3212,11 @@
 
   <!-- Top-level page nav. Hash routing keeps this purely client-side. -->
   <nav class="page-nav" id="pageNav">
-    <button class="page-nav-tab active" data-page="portfolio" onclick="switchPage('portfolio')">Portfolio</button>
-    <button class="page-nav-tab" data-page="defi" onclick="switchPage('defi')">DeFi</button>
-    <button class="page-nav-tab" data-page="rwas" onclick="switchPage('rwas')">RWAs</button>
-    <button class="page-nav-tab" data-page="fx" onclick="switchPage('fx')">FX</button>
-    <button class="page-nav-tab" data-page="profile" onclick="switchPage('profile')">Profile</button>
+    <button class="page-nav-tab active" data-page="portfolio" data-action="switch-page">Portfolio</button>
+    <button class="page-nav-tab" data-page="defi" data-action="switch-page">DeFi</button>
+    <button class="page-nav-tab" data-page="rwas" data-action="switch-page">RWAs</button>
+    <button class="page-nav-tab" data-page="fx" data-action="switch-page">FX</button>
+    <button class="page-nav-tab" data-page="profile" data-action="switch-page">Profile</button>
   </nav>
 
   <div class="main" id="app">
@@ -3223,10 +3229,10 @@
       <p>Full portfolio visibility — track multiple wallets, Soroban DeFi, LP positions, and portfolio value over time.</p>
 
       <div style="display: flex; gap: 16px; justify-content: center; margin-bottom: 32px; flex-wrap: wrap;">
-        <button class="btn" onclick="enterPortfolioMode()" style="padding: 14px 32px; font-size: 16px; border-radius: 16px;">
+        <button class="btn" data-action="enter-portfolio-mode" style="padding: 14px 32px; font-size: 16px; border-radius: 16px;">
           My Portfolio
         </button>
-        <button class="btn btn-secondary" id="heroWalletBtn" onclick="connectWalletViaModal()" style="padding: 14px 32px; font-size: 16px; border-radius: 16px;" title="Connect any supported Stellar wallet">
+        <button class="btn btn-secondary" id="heroWalletBtn" data-action="connect-wallet-modal" style="padding: 14px 32px; font-size: 16px; border-radius: 16px;" title="Connect any supported Stellar wallet">
           Connect Wallet
         </button>
       </div>
@@ -3234,27 +3240,27 @@
       <div class="wallet-picker">
         <div class="wallet-picker-label">Or pick a wallet:</div>
         <div class="wallet-picker-row">
-          <button class="wallet-pill" onclick="connectWalletById('freighter', 'Freighter')" title="Connect Freighter">
+          <button class="wallet-pill" data-action="connect-wallet" data-wallet-id="freighter" data-wallet-label="Freighter" title="Connect Freighter">
             <img src="https://stellar.creit.tech/wallet-icons/freighter.png" alt="" />
             Freighter
           </button>
-          <button class="wallet-pill" onclick="connectWalletById('albedo', 'Albedo')" title="Connect Albedo">
+          <button class="wallet-pill" data-action="connect-wallet" data-wallet-id="albedo" data-wallet-label="Albedo" title="Connect Albedo">
             <img src="https://stellar.creit.tech/wallet-icons/albedo.png" alt="" />
             Albedo
           </button>
-          <button class="wallet-pill" onclick="connectWalletById('lobstr', 'LOBSTR')" title="Connect LOBSTR">
+          <button class="wallet-pill" data-action="connect-wallet" data-wallet-id="lobstr" data-wallet-label="LOBSTR" title="Connect LOBSTR">
             <img src="https://stellar.creit.tech/wallet-icons/lobstr.png" alt="" />
             LOBSTR
           </button>
-          <button class="wallet-pill" onclick="connectWalletById('hana', 'Hana')" title="Connect Hana">
+          <button class="wallet-pill" data-action="connect-wallet" data-wallet-id="hana" data-wallet-label="Hana" title="Connect Hana">
             <img src="https://stellar.creit.tech/wallet-icons/hana.png" alt="" />
             Hana
           </button>
-          <button class="wallet-pill" onclick="connectWalletById('rabet', 'Rabet')" title="Connect Rabet">
+          <button class="wallet-pill" data-action="connect-wallet" data-wallet-id="rabet" data-wallet-label="Rabet" title="Connect Rabet">
             <img src="https://stellar.creit.tech/wallet-icons/rabet.png" alt="" />
             Rabet
           </button>
-          <button class="wallet-pill wallet-pill-other" onclick="connectWalletViaModal()" title="WalletConnect, Ledger, and others">
+          <button class="wallet-pill wallet-pill-other" data-action="connect-wallet-modal" title="WalletConnect, Ledger, and others">
             Other wallet…
           </button>
         </div>
@@ -3668,7 +3674,7 @@
                    <div class="cp-hint" style="margin-top:8px">This wallet will be linked to the profile. You'll sign a challenge with it to prove control.</div>`
                 : `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                      <div class="cp-wallet-pill empty">No wallet connected</div>
-                     <button class="btn" onclick="connectWalletFromProfile()" style="padding:8px 16px;font-size:13px">Connect Wallet</button>
+                     <button class="btn" data-action="connect-wallet-from-profile" style="padding:8px 16px;font-size:13px">Connect Wallet</button>
                    </div>
                    <div class="cp-hint" style="margin-top:8px">You'll sign a message with the connected wallet to prove control of the profile — no funds move, no gas fee.</div>`}
             </div>
@@ -3677,8 +3683,8 @@
           <div class="cp-status" id="cpStatus"></div>
 
           <div class="cp-actions">
-            <button class="btn btn-secondary" onclick="switchPage('portfolio')">Cancel</button>
-            <button class="btn" id="cpSubmit" onclick="submitCreateProfile()" ${(!cpState.wallet || cpState.submitting) ? "disabled" : ""}>
+            <button class="btn btn-secondary" data-action="switch-page" data-page="portfolio">Cancel</button>
+            <button class="btn" id="cpSubmit" data-action="submit-create-profile" ${(!cpState.wallet || cpState.submitting) ? "disabled" : ""}>
               ${cpState.submitting ? "Signing…" : "Sign & Create Profile"}
             </button>
           </div>
@@ -3842,8 +3848,8 @@
           <div class="cp-status" id="mpStatus"></div>
 
           <div class="cp-actions">
-            <button class="btn btn-secondary" onclick="switchPage('portfolio')">Back to Portfolio</button>
-            <button class="btn" id="mpSave" onclick="saveProfileChanges()"${mpState.isMember ? "" : " disabled"}>Save Changes</button>
+            <button class="btn btn-secondary" data-action="switch-page" data-page="portfolio">Back to Portfolio</button>
+            <button class="btn" id="mpSave" data-action="save-profile-changes"${mpState.isMember ? "" : " disabled"}>Save Changes</button>
           </div>
 
           <div class="cp-card" style="border-color:var(--red); margin-top:32px">
@@ -3856,7 +3862,7 @@
               <label class="cp-label" for="mpDeleteConfirm">Type <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${escapeHtml(mpState.slug)}</span> to confirm</label>
               <input class="cp-input mono" id="mpDeleteConfirm" placeholder="${escapeHtml(mpState.slug)}" />
             </div>
-            <button class="btn" id="mpDelete" onclick="deleteMyProfile()" style="background:var(--red); color:white; width:100%" disabled>Delete Profile</button>
+            <button class="btn" id="mpDelete" data-action="delete-my-profile" style="background:var(--red); color:white; width:100%" disabled>Delete Profile</button>
           </div>
         </div>
       `;
@@ -4163,7 +4169,7 @@
           <div class="rwa-page-subtitle">
             Executable conversion costs at real sizes — every rate is a live quote against on-chain liquidity, not an indicative price.
             Updated ${escapeHtml(fmtAgo(data.updatedAt))}${data.stale ? " · <b>stale</b>" : ""}
-            · <a href="#" onclick="renderFxPage({fresh:true}); return false;" style="color:var(--accent, #6366f1)">Refresh now</a>
+            · <a href="#" data-action="refresh-fx" style="color:var(--accent, #6366f1)">Refresh now</a>
           </div>
           <div class="defi-howto">
             <details>
@@ -5085,7 +5091,7 @@
           const assets = w.assetCount != null ? w.assetCount : "—";
           return `<tr class="whale-row" data-action="look-up-whale" data-address="${escapeHtml(w.address)}">
             <td class="whale-rank">#${i + 1}</td>
-            <td class="whale-address"><a href="#" onclick="event.preventDefault()">${shortAddr}</a></td>
+            <td class="whale-address"><a href="#" data-prevent-default>${shortAddr}</a></td>
             <td class="whale-balance">${balM}</td>
             <td class="whale-balance">${assets}</td>
           </tr>`;
@@ -5116,7 +5122,7 @@
           const assets = w.assetCount != null ? w.assetCount : "—";
           return `<tr class="whale-row" data-action="look-up-whale" data-address="${escapeHtml(w.address)}">
             <td class="whale-rank">#${i + 1}</td>
-            <td class="whale-address"><a href="#" onclick="event.preventDefault()">${shortAddr}</a></td>
+            <td class="whale-address"><a href="#" data-prevent-default>${shortAddr}</a></td>
             <td class="whale-balance">${usdVal}</td>
             <td class="whale-balance">${assets}</td>
           </tr>`;
@@ -5224,7 +5230,7 @@
       const backdrop = document.createElement("div");
       backdrop.className = "share-modal-backdrop";
       backdrop.innerHTML = `
-        <div class="share-modal" onclick="event.stopPropagation()">
+        <div class="share-modal">
           <div class="share-modal-title">Share this portfolio</div>
           <div class="share-modal-sub">Anyone with this link can see the same wallets, positions, and balances. Read-only — they can choose to save into their own portfolio.</div>
           <div class="share-modal-url" id="shareModalUrl">${escapeHtml(url)}</div>
@@ -5234,11 +5240,14 @@
           </div>
           ${FEATURES.profileTab ? `<div class="share-modal-alt">
             <span style="color:var(--text-muted);font-size:12px">Want a persistent URL with your name?</span>
-            <a href="#/profile" onclick="event.stopPropagation();document.querySelector('.share-modal-backdrop')?.remove();switchPage('profile');" style="color:var(--accent);font-size:12px;text-decoration:none;font-weight:600">Create a Profile →</a>
+            <a href="#/profile" data-action="share-create-profile" style="color:var(--accent);font-size:12px;text-decoration:none;font-weight:600">Create a Profile →</a>
           </div>` : ""}
         </div>
       `;
-      backdrop.onclick = () => backdrop.remove();
+      // Close on a click on the dimmed backdrop itself. The panel used to stop
+      // its clicks from reaching the backdrop with an inline stopPropagation
+      // handler; checking the target does the same job without one.
+      backdrop.onclick = (e) => { if (e.target === backdrop) backdrop.remove(); };
       document.body.appendChild(backdrop);
       document.getElementById("shareCopyBtn").onclick = (e) => {
         e.stopPropagation();
@@ -5485,7 +5494,18 @@
     // re-rendered into innerHTML. `closest` picks the innermost element with a
     // data-action, which is what makes the wallet-remove button inside a
     // clickable wallet row resolve to "remove" rather than "switch view".
+    //
+    // Every other click handler in the page routes through here too. They used
+    // to be static on*= attributes: constant strings, so never injection
+    // vectors, but each one needed `script-src 'unsafe-inline'` to run, and
+    // that keyword is what stops the CSP from blocking an injected script. With
+    // no inline handlers left, only the inline <script> blocks stand between
+    // the CSP and `script-src 'self'` (see security-headers.js).
+    // switchTab and switchAggTab still read the global `event` to find the
+    // clicked .tab; that is this click event, exactly as it was inline.
     document.addEventListener("click", (event) => {
+      // <a href="#"> elements that exist only to look like links.
+      if (event.target.closest("[data-prevent-default]")) event.preventDefault();
       const el = event.target.closest("[data-action]");
       if (!el) return;
       const address = el.getAttribute("data-address");
@@ -5507,7 +5527,111 @@
           if (range) changeChartRange(range);
           break;
         }
+
+        // Header, landing and wallet connection.
+        case "go-home":
+          goHome();
+          break;
+        case "toggle-theme":
+          toggleTheme();
+          break;
+        case "load-portfolio":
+          loadPortfolio();
+          break;
+        case "add-current-to-portfolio":
+          addCurrentToPortfolio();
+          break;
+        case "enter-portfolio-mode":
+          enterPortfolioMode();
+          break;
+        case "connect-wallet-modal":
+          connectWalletViaModal();
+          break;
+        case "connect-wallet":
+          connectWalletById(el.getAttribute("data-wallet-id"), el.getAttribute("data-wallet-label"));
+          break;
+
+        // Page nav and tabs.
+        case "switch-page":
+          switchPage(el.getAttribute("data-page"));
+          break;
+        case "switch-tab":
+          switchTab(el.getAttribute("data-tab"));
+          break;
+        case "switch-agg-tab":
+          switchAggTab(el.getAttribute("data-tab"));
+          break;
+
+        // Profile page.
+        case "connect-wallet-from-profile":
+          connectWalletFromProfile();
+          break;
+        case "submit-create-profile":
+          submitCreateProfile();
+          break;
+        case "save-profile-changes":
+          saveProfileChanges();
+          break;
+        case "delete-my-profile":
+          deleteMyProfile();
+          break;
+
+        // FX page.
+        case "refresh-fx":
+          event.preventDefault();
+          renderFxPage({ fresh: true });
+          break;
+
+        // Multi-wallet portfolio, sharing and time travel.
+        case "add-wallet":
+          handleAddWallet();
+          break;
+        case "load-multi-wallet-portfolio":
+          loadMultiWalletPortfolio();
+          break;
+        case "open-share-modal":
+          openShareModal();
+          break;
+        case "share-create-profile":
+          document.querySelector(".share-modal-backdrop")?.remove();
+          switchPage("profile");
+          break;
+        case "save-shared-wallets":
+          saveSharedWallets();
+          break;
+        case "dismiss-shared-view":
+          dismissSharedView();
+          break;
+        case "back-to-live":
+          backToLive();
+          break;
+        case "go-to-date":
+          goToDate();
+          break;
+
+        // Cramer overlay. The backdrop closes only on a click on itself, not
+        // on a click that bubbled up from the panel inside it.
+        case "cramer-backdrop":
+          if (event.target === el) hideCramer();
+          break;
+        case "hide-cramer":
+          hideCramer();
+          break;
+        case "cramer-shout":
+          cramerShout(
+            el.getAttribute("data-phrase"),
+            el.getAttribute("data-flash"),
+            el.getAttribute("data-shake") === "true",
+          );
+          break;
       }
+    });
+
+    // Enter in the add-wallet address field submits it (was an inline onkeydown).
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      const el = event.target.closest?.("[data-enter-action]");
+      if (el && el.getAttribute("data-enter-action") === "add-wallet") handleAddWallet();
     });
 
     // NFT images point at arbitrary on-chain token_uri hosts, so a broken image
@@ -5598,7 +5722,7 @@
         app.innerHTML = `
           <div class="error-banner">${escapeHtml(e.message)}</div>
           <div style="text-align:center; padding: 40px;">
-            <button class="btn" onclick="enterPortfolioMode()">Try again</button>
+            <button class="btn" data-action="enter-portfolio-mode">Try again</button>
           </div>
         `;
       }
@@ -5662,8 +5786,8 @@
               : `Viewing <strong>${escapeHtml(sharedView.name || "Shared portfolio")}</strong> &middot; ${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""} &middot; read-only`}
           </div>
           <div class="share-banner-actions">
-            <button class="share-btn" onclick="saveSharedWallets()">Save to my portfolio</button>
-            <button class="share-btn" onclick="dismissSharedView()">Dismiss</button>
+            <button class="share-btn" data-action="save-shared-wallets">Save to my portfolio</button>
+            <button class="share-btn" data-action="dismiss-shared-view">Dismiss</button>
           </div>
         </div>
       ` : "";
@@ -5684,7 +5808,7 @@
           <div class="wallet-panel-header">
             <div class="wallet-panel-title">${sharedView.active ? "Shared Wallets" : "My Wallets"}</div>
             <div class="wallet-panel-actions">
-              ${!sharedView.active ? '<button class="share-btn" onclick="openShareModal()" title="Share this portfolio as a link"><span aria-hidden="true">&#x1F517;</span> Share</button>' : ""}
+              ${!sharedView.active ? '<button class="share-btn" data-action="open-share-modal" title="Share this portfolio as a link"><span aria-hidden="true">&#x1F517;</span> Share</button>' : ""}
               <span class="wallet-panel-count">${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""}</span>
             </div>
           </div>
@@ -5693,7 +5817,7 @@
 
       // "All wallets" option
       walletPanelHTML += `
-        <div class="wallet-item ${activeView === "all" ? "active" : ""}" onclick="switchWalletView('all')">
+        <div class="wallet-item ${activeView === "all" ? "active" : ""}" data-action="switch-wallet-view" data-address="all">
           <div class="wallet-item-left">
             <div class="wallet-item-avatar" style="background: linear-gradient(135deg, var(--stellar-blue), var(--purple)); font-size: 16px;">All</div>
             <div class="wallet-item-info">
@@ -5744,8 +5868,8 @@
           <div class="wallet-add-form">
             <input type="text" id="walletLabelInput" placeholder="Label (optional)" style="max-width:150px" />
             <input type="text" id="walletAddInput" placeholder="Stellar address (G...)" spellcheck="false"
-              onkeydown="if(event.key==='Enter')handleAddWallet()" />
-            <button class="btn" onclick="handleAddWallet()">Add</button>
+              data-enter-action="add-wallet" />
+            <button class="btn" data-action="add-wallet">Add</button>
           </div>
         `;
       }
@@ -5813,26 +5937,26 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               <div class="meta-item">DeFi: <span>${defiPositions.length}</span></div>
             </div>
           </div>
-          <button class="btn btn-secondary" onclick="loadMultiWalletPortfolio()">Refresh</button>
+          <button class="btn btn-secondary" data-action="load-multi-wallet-portfolio">Refresh</button>
         </div>
 
         <div class="tabs">
-          <button class="tab ${currentTab === "tokens" ? "active" : ""}" onclick="switchTab('tokens')">
+          <button class="tab ${currentTab === "tokens" ? "active" : ""}" data-action="switch-tab" data-tab="tokens">
             Tokens<span class="tab-count">${tokens.length}</span>
           </button>
-          <button class="tab ${currentTab === "portfolio" ? "active" : ""}" onclick="switchTab('portfolio')">
+          <button class="tab ${currentTab === "portfolio" ? "active" : ""}" data-action="switch-tab" data-tab="portfolio">
             History
           </button>
-          <button class="tab ${currentTab === "defi" ? "active" : ""}" onclick="switchTab('defi')">
+          <button class="tab ${currentTab === "defi" ? "active" : ""}" data-action="switch-tab" data-tab="defi">
             DeFi<span class="tab-count">${defiPositions.length}</span>
           </button>
-          <button class="tab ${currentTab === "history" ? "active" : ""}" onclick="switchTab('history')">
+          <button class="tab ${currentTab === "history" ? "active" : ""}" data-action="switch-tab" data-tab="history">
             Transactions
           </button>
-          <button class="tab ${currentTab === "claimable" ? "active" : ""}" onclick="switchTab('claimable')">
+          <button class="tab ${currentTab === "claimable" ? "active" : ""}" data-action="switch-tab" data-tab="claimable">
             Claimable
           </button>
-          <button class="tab ${currentTab === "nfts" ? "active" : ""}" onclick="switchTab('nfts')">
+          <button class="tab ${currentTab === "nfts" ? "active" : ""}" data-action="switch-tab" data-tab="nfts">
             NFTs
           </button>
         </div>
@@ -5927,22 +6051,22 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         </div>
 
         <div class="tabs">
-          <button class="tab ${currentAggTab === "tokens" ? "active" : ""}" onclick="switchAggTab('tokens')">
+          <button class="tab ${currentAggTab === "tokens" ? "active" : ""}" data-action="switch-agg-tab" data-tab="tokens">
             Tokens<span class="tab-count">${balances.length}</span>
           </button>
-          <button class="tab ${currentAggTab === "history" ? "active" : ""}" onclick="switchAggTab('history')">
+          <button class="tab ${currentAggTab === "history" ? "active" : ""}" data-action="switch-agg-tab" data-tab="history">
             History
           </button>
-          <button class="tab ${currentAggTab === "defi" ? "active" : ""}" onclick="switchAggTab('defi')">
+          <button class="tab ${currentAggTab === "defi" ? "active" : ""}" data-action="switch-agg-tab" data-tab="defi">
             DeFi<span class="tab-count">${totalDefiCount}</span>
           </button>
-          <button class="tab ${currentAggTab === "transactions" ? "active" : ""}" onclick="switchAggTab('transactions')">
+          <button class="tab ${currentAggTab === "transactions" ? "active" : ""}" data-action="switch-agg-tab" data-tab="transactions">
             Transactions
           </button>
-          <button class="tab ${currentAggTab === "claimable" ? "active" : ""}" onclick="switchAggTab('claimable')">
+          <button class="tab ${currentAggTab === "claimable" ? "active" : ""}" data-action="switch-agg-tab" data-tab="claimable">
             Claimable
           </button>
-          <button class="tab ${currentAggTab === "nfts" ? "active" : ""}" onclick="switchAggTab('nfts')">
+          <button class="tab ${currentAggTab === "nfts" ? "active" : ""}" data-action="switch-agg-tab" data-tab="nfts">
             NFTs
           </button>
         </div>
@@ -6250,8 +6374,8 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
             <div class="wallet-add-form">
               <input type="text" id="walletLabelInput" placeholder="Label (optional)" style="max-width:150px" />
               <input type="text" id="walletAddInput" placeholder="Stellar address (G...)" spellcheck="false"
-                onkeydown="if(event.key==='Enter')handleAddWallet()" />
-              <button class="btn" onclick="handleAddWallet()">Add Wallet</button>
+                data-enter-action="add-wallet" />
+              <button class="btn" data-action="add-wallet">Add Wallet</button>
             </div>
           </div>
         `;
@@ -6309,7 +6433,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         : "";
 
       const backBtn = timeTravelDate
-        ? `<button class="btn-sm btn-back-to-live" onclick="backToLive()">Back to Live</button>`
+        ? `<button class="btn-sm btn-back-to-live" data-action="back-to-live">Back to Live</button>`
         : "";
 
       return `
@@ -6318,7 +6442,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           <label>View balances at:</label>
           <input type="datetime-local" id="timeTravelInput" max="${maxDate}"
             value="${timeTravelDate || ""}" />
-          <button class="btn-sm btn-go" onclick="goToDate()">Go</button>
+          <button class="btn-sm btn-go" data-action="go-to-date">Go</button>
           ${backBtn}
           ${info}
         </div>
@@ -6533,7 +6657,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               <div class="meta-item">Updated: <span>${timeAgo(d.lastUpdated)}</span></div>
             </div>
           </div>
-          <button class="btn btn-secondary" onclick="loadPortfolio()">Refresh</button>
+          <button class="btn btn-secondary" data-action="load-portfolio">Refresh</button>
         </div>
 
         ${breakdownHTML}
@@ -6571,23 +6695,23 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         </div>
 
         <div class="tabs">
-          <button class="tab ${currentTab === "tokens" ? "active" : ""}" onclick="switchTab('tokens')">
+          <button class="tab ${currentTab === "tokens" ? "active" : ""}" data-action="switch-tab" data-tab="tokens">
             Tokens<span class="tab-count">${tokens.length}</span>
           </button>
-          <button class="tab ${currentTab === "portfolio" ? "active" : ""}" onclick="switchTab('portfolio')">
+          <button class="tab ${currentTab === "portfolio" ? "active" : ""}" data-action="switch-tab" data-tab="portfolio">
             Portfolio
             ${d.isTracked ? '<span class="tab-count" style="background:rgba(34,197,94,0.2);color:var(--green)">tracking</span>' : ""}
           </button>
-          <button class="tab ${currentTab === "defi" ? "active" : ""}" onclick="switchTab('defi')">
+          <button class="tab ${currentTab === "defi" ? "active" : ""}" data-action="switch-tab" data-tab="defi">
             DeFi<span class="tab-count">${defiPositions.length}</span>
           </button>
-          <button class="tab ${currentTab === "history" ? "active" : ""}" onclick="switchTab('history')">
+          <button class="tab ${currentTab === "history" ? "active" : ""}" data-action="switch-tab" data-tab="history">
             History
           </button>
-          <button class="tab ${currentTab === "claimable" ? "active" : ""}" onclick="switchTab('claimable')">
+          <button class="tab ${currentTab === "claimable" ? "active" : ""}" data-action="switch-tab" data-tab="claimable">
             Claimable
           </button>
-          <button class="tab ${currentTab === "nfts" ? "active" : ""}" onclick="switchTab('nfts')">
+          <button class="tab ${currentTab === "nfts" ? "active" : ""}" data-action="switch-tab" data-tab="nfts">
             NFTs
           </button>
         </div>
@@ -7622,21 +7746,21 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
   </script>
 
   <!-- Easter egg: Cramer soundboard. Hidden by default; revealed by Konami code. -->
-  <div class="cramer-overlay" id="cramerOverlay" onclick="if(event.target===this)hideCramer()">
+  <div class="cramer-overlay" id="cramerOverlay" data-action="cramer-backdrop">
     <div class="cramer-panel">
       <div class="cramer-header">
         <div>
           <div class="cramer-title">📈 MAD MONEY 📉</div>
           <div class="cramer-subtitle">Press the buttons. Trust the buttons.</div>
         </div>
-        <button class="cramer-close" onclick="hideCramer()" aria-label="Close">×</button>
+        <button class="cramer-close" data-action="hide-cramer" aria-label="Close">×</button>
       </div>
       <div class="cramer-grid">
-        <button class="cramer-btn buy"    onclick="cramerShout('BUY BUY BUY','green',false)">BUY BUY BUY</button>
-        <button class="cramer-btn sell"   onclick="cramerShout('SELL SELL SELL','red',true)">SELL SELL SELL</button>
-        <button class="cramer-btn booyah" onclick="cramerShout('BOOYAH','gold',true)">BOOYAH!</button>
-        <button class="cramer-btn pain"   onclick="cramerShout('HOUSE OF PAIN','red',true)">HOUSE OF PAIN</button>
-        <button class="cramer-btn nothin" onclick="cramerShout('They know NOTHING. NOTHING!','gold',false)">THEY KNOW NOTHING</button>
+        <button class="cramer-btn buy"    data-action="cramer-shout" data-phrase="BUY BUY BUY" data-flash="green" data-shake="false">BUY BUY BUY</button>
+        <button class="cramer-btn sell"   data-action="cramer-shout" data-phrase="SELL SELL SELL" data-flash="red" data-shake="true">SELL SELL SELL</button>
+        <button class="cramer-btn booyah" data-action="cramer-shout" data-phrase="BOOYAH" data-flash="gold" data-shake="true">BOOYAH!</button>
+        <button class="cramer-btn pain"   data-action="cramer-shout" data-phrase="HOUSE OF PAIN" data-flash="red" data-shake="true">HOUSE OF PAIN</button>
+        <button class="cramer-btn nothin" data-action="cramer-shout" data-phrase="They know NOTHING. NOTHING!" data-flash="gold" data-shake="false">THEY KNOW NOTHING</button>
       </div>
       <div class="cramer-hint">PRESS <kbd>ESC</kbd> TO CLOSE · NOT FINANCIAL ADVICE</div>
     </div>

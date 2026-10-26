@@ -152,6 +152,35 @@ test("no inline event handler is built by string interpolation", () => {
   assert.deepEqual(offenders, [], `interpolated inline handlers: ${JSON.stringify(offenders)}`);
 });
 
+test("no page has an inline on*= event-handler attribute", () => {
+  // Even a constant inline handler needs `script-src 'unsafe-inline'` to run,
+  // and that keyword is what stops the CSP from blocking an injected script.
+  // Every handler routes through the delegated data-action listener instead.
+  // The leading \s keeps `data-action="` and `content="` from matching.
+  const dir = path.join(__dirname, "..", "public");
+  const offenders = [];
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".html"))) {
+    fs.readFileSync(path.join(dir, file), "utf8").split("\n").forEach((line, i) => {
+      if (/\son[a-z]+=["']/i.test(line)) offenders.push(`${file}:${i + 1}`);
+    });
+  }
+  assert.deepEqual(offenders, [], `inline event handlers: ${offenders.join(", ")}`);
+});
+
+test("every data-action in index.html has a case in the delegated listener", () => {
+  // A data-action with no matching case is a button that silently does nothing.
+  const start = INDEX.indexOf("// ── Delegated event handling");
+  const end = INDEX.indexOf("// Enter in the add-wallet address field");
+  assert.ok(start > 0 && end > start, "delegated listener block not found");
+  const listener = INDEX.slice(start, end);
+  const cases = new Set([...listener.matchAll(/case "([a-z-]+)":/g)].map((m) => m[1]));
+  const actions = new Set([...INDEX.matchAll(/data-action="([^"]*)"/g)].map((m) => m[1]));
+  const missing = [...actions].filter((a) => !cases.has(a));
+  assert.deepEqual(missing, [], `data-action values with no case: ${missing.join(", ")}`);
+  assert.match(INDEX, /data-enter-action="add-wallet"/);
+  assert.match(INDEX, /getAttribute\("data-enter-action"\) === "add-wallet"\) handleAddWallet\(\)/);
+});
+
 test("index.html defines exactly one escaper and one URL guard", () => {
   // There used to be three: two identical `function escapeHtml` declarations in
   // the SAME scope (the later silently winning) plus escapeShareHtml.
