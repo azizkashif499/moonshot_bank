@@ -11,6 +11,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "packageManager": "npm@10.9.9",
   "dependencies": {
     "@stellar/stellar-sdk": "^17.2.1",
     "better-sqlite3": "^13.0.3",

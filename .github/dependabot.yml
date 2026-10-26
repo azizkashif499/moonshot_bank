@@ -2,6 +2,14 @@ version: 2
 updates:
   # The real manifest lives in prototype/. The repo root has a package.json with
   # no dependencies and a 143-byte stub lockfile.
+  #
+  # prototype/package.json pins "packageManager": "npm@10.9.9" because Dependabot
+  # takes its npm version from that field. Without it, a lockfileVersion 3
+  # lockfile is rewritten with Dependabot's default npm (12 at the time of
+  # writing), which drops nested optional-peer entries that npm 10's `npm ci`
+  # requires, so CI and Railway (both Node 22 / npm 10) fail to install. That
+  # broke #95, #103 and #106. Keep the pin on the npm major CI and Railway use;
+  # move both together.
   - package-ecosystem: npm
     directory: /prototype
     schedule:
