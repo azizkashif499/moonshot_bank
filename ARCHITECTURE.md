@@ -126,3 +126,37 @@ signature verification, the profile routes' authorization, the write-path
 guards, input filtering, security headers, and source-level guardrails over
 `index.html` (no interpolated inline handlers, one escaper, every interpolated
 URL through `safeUrl`).
+
+## Running locally
+
+Node 22 or newer; CI and Railway use Node 22 with npm 10. From `prototype/`:
+
+```
+npx -y npm@10 ci   # exact install from the lockfile
+npm start          # http://localhost:4000, health check at /api/health
+npm test
+```
+
+No `.env` is needed. Every setting has a default, and `prototype/.env.example`
+lists all of them (a test keeps that list in step with the code). The database
+is created at `prototype/data/history.db`, which is gitignored; delete it to
+start clean. Aquarius and Solv stay off until their contract IDs are set; the
+other seven adapters need no configuration.
+
+Use npm 10 for anything that rewrites `package-lock.json`
+(`npx -y npm@10 install …`, `npx -y npm@10 update <pkg> --package-lock-only`).
+npm 11 and later drop nested optional-peer entries that npm 10's `npm ci`
+requires, and CI and Railway both run `npm ci` with npm 10.
+
+### Windows
+
+- `better-sqlite3` compiles its native module when no prebuilt binary is
+  available for your Node version. That needs Visual Studio 2022 Build Tools
+  with the "Desktop development with C++" workload.
+- If PowerShell refuses to run `npm` or `npx` ("running scripts is disabled on
+  this system"), call `npm.cmd` / `npx.cmd`, which skip the `.ps1` shims, or
+  allow local scripts with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+- After `npm run build:vendor`, git may list
+  `public/vendor/stellar-wallets-kit-2.3.0.js` as modified purely because of
+  line endings. If `git diff --stat -- public/vendor` prints nothing, the
+  bundle is identical; `git update-index --refresh` clears the flag.
