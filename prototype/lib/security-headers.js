@@ -14,33 +14,61 @@
  * which no directive governs.
  */
 
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const helmet = require("helmet");
 
-// `unsafe-inline` for scripts is a KNOWN, TEMPORARY weakness — see the comment
-// on scriptSrc below. Exported so the header test can assert on it and so it is
-// impossible to change by accident.
+const PUBLIC_DIR = path.join(__dirname, "..", "public");
+
+/**
+ * CSP hash-sources for every inline <script> block in the static pages.
+ *
+ * The browser hashes a script element's text exactly as the HTML parser sees
+ * it, and the parser turns CRLF and lone CR into LF before it does anything
+ * else. A Windows checkout with core.autocrlf stores index.html with CRLF, so
+ * the text is normalised the same way here; hashing the raw bytes would give a
+ * value the browser never computes, and every inline script would be blocked.
+ *
+ * Computed once at boot from the files express.static serves, so editing an
+ * inline script needs a restart, not a hand-maintained hash list.
+ */
+function inlineScriptHashes(html) {
+  const hashes = [];
+  for (const m of html.replace(/\r\n?/g, "\n").matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+    if (/(?:^|\s)src\s*=/i.test(m[1])) continue; // external file: covered by 'self' (data-src= is not src=)
+    const digest = crypto.createHash("sha256").update(m[2], "utf8").digest("base64");
+    hashes.push(`'sha256-${digest}'`);
+  }
+  return hashes;
+}
+
+function staticPageScriptHashes(dir = PUBLIC_DIR) {
+  const hashes = new Set();
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".html")).sort()) {
+    for (const h of inlineScriptHashes(fs.readFileSync(path.join(dir, file), "utf8"))) hashes.add(h);
+  }
+  return [...hashes];
+}
+
+// Exported so the header test can assert on it and so it is impossible to
+// change by accident.
 const CSP_DIRECTIVES = {
   defaultSrc: ["'self'"],
 
-  // NOT LOCKED DOWN YET, and this must not be mistaken for one that is.
+  // No 'unsafe-inline': an injected <script> or on*= attribute does not run.
+  // The page's own inline <script> blocks (four, in index.html) are allowed by
+  // their sha256 hashes, computed at boot above. The on*= attributes that used
+  // to need 'unsafe-inline' are gone: all 68 route through the delegated
+  // data-action listener in index.html, and test/label-xss.test.js fails if
+  // one comes back. Event handlers assigned from JavaScript (el.onclick = fn)
+  // are not affected by CSP and still work.
   //
-  // With 'unsafe-inline' the policy is not an XSS backstop. It IS a backstop
-  // against an injected <script src> pointing at an attacker's host, an
-  // injected <object>/<embed>, a rewritten <base>, framing, and form-based
-  // exfiltration — all of which the directives below do block.
-  //
-  // What stands in the way of `script-src 'self'`: the four inline <script>
-  // blocks in index.html (a nonce or a hash solves those). The static on*=
-  // attributes, which were constant strings and so CSP blockers rather than
-  // injection vectors, are gone: all 68 (66 onclick, 2 onkeydown) now route
-  // through the delegated data-action listener in index.html, and
-  // test/label-xss.test.js fails if one comes back.
-  //
-  // Count them with `grep -oE '\son[a-z]+="' public/index.html`, NOT with
-  // `grep -o 'on[a-z]*="'`: that pattern also matches the tail of
-  // `data-action="` and `content="`, which is how the figure 78 was first
-  // mis-stated as the post-change count.
-  scriptSrc: ["'self'", "'unsafe-inline'"],
+  // To add an inline script, just add it: the hash follows on the next start,
+  // and test/headers.test.js checks every inline block on every HTML route is
+  // covered. Server-generated HTML (/api/docs) must not contain inline
+  // scripts; the same test fails if it does.
+  scriptSrc: ["'self'", ...staticPageScriptHashes()],
 
   // REQUIRED. index.html carries a large <style> block plus inline style="…"
   // attributes on 191 lines, many built at render time
@@ -106,4 +134,4 @@ function installSecurityHeaders(app, { reportOnly = process.env.CSP_REPORT_ONLY 
   );
 }
 
-module.exports = { installSecurityHeaders, CSP_DIRECTIVES };
+module.exports = { installSecurityHeaders, CSP_DIRECTIVES, inlineScriptHashes };

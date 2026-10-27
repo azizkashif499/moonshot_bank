@@ -5498,9 +5498,11 @@
     // Every other click handler in the page routes through here too. They used
     // to be static on*= attributes: constant strings, so never injection
     // vectors, but each one needed `script-src 'unsafe-inline'` to run, and
-    // that keyword is what stops the CSP from blocking an injected script. With
-    // no inline handlers left, only the inline <script> blocks stand between
-    // the CSP and `script-src 'self'` (see security-headers.js).
+    // that keyword is what stops the CSP from blocking an injected script. The
+    // CSP no longer allows it: this page's own <script> blocks run by sha256
+    // hash (see security-headers.js), and an inline onclick attribute added to
+    // the markup would be blocked by the browser (and fail label-xss.test.js).
+    // Add a data-action and a case below instead.
     // switchTab and switchAggTab still read the global `event` to find the
     // clicked .tab; that is this click event, exactly as it was inline.
     document.addEventListener("click", (event) => {
