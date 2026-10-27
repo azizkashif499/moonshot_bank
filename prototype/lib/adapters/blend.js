@@ -169,24 +169,33 @@ async function getUserPositions(poolContractId, userAddress) {
   return r ? scValToNative(r) : null;
 }
 
-/**
- * Get pending BLND emissions for a user on a specific reserve/type combo.
- * reserve_token_index encoding (per Blend docs):
- *   index * 2     = bToken (suppliers) for that reserve
- *   index * 2 + 1 = dToken (borrowers) for that reserve
- */
-async function getUserEmissions(poolContractId, userAddress, reserveTokenIndex) {
-  try {
-    const userScVal = new Address(userAddress).toScVal();
-    const indexScVal = nativeToScVal(reserveTokenIndex, { type: "u32" });
-    const result = await simulateContractCall(poolContractId, "get_user_emissions",
-      [userScVal, indexScVal]);
-    if (result == null) return 0n;
-    if (typeof result === "bigint") return result;
-    if (typeof result === "object" && result.accrued != null) return BigInt(result.accrued);
-    if (typeof result === "object" && result.amount != null) return BigInt(result.amount);
-    return 0n;
-  } catch (e) { return 0n; }
+// BLND emissions are tracked per "reserve token id", one per side of each
+// reserve (blend-contracts-v2, pool/src/contract.rs):
+//   reserve_index * 2     → dTokens (liabilities / borrows)
+//   reserve_index * 2 + 1 → bTokens (supply + collateral)
+// This was previously documented and used the other way round, so a supplier
+// was asked about the borrow side's emissions and vice versa.
+const emissionTokenId = {
+  borrow: (reserveIndex) => reserveIndex * 2,
+  supply: (reserveIndex) => reserveIndex * 2 + 1,
+};
+
+/** ReserveEmissionData { expiration, eps, index, last_time }, or null if this side never had emissions. */
+async function getReserveEmissions(poolContractId, reserveTokenId) {
+  const idScVal = nativeToScVal(reserveTokenId, { type: "u32" });
+  const r = await simulateContractCall(poolContractId, "get_reserve_emissions", [idScVal]);
+  return r ? scValToNative(r) : null;
+}
+
+/** UserEmissionData { index, accrued }, or null if the user has no entry for this side. */
+async function getUserEmissions(poolContractId, userAddress, reserveTokenId) {
+  const userScVal = new Address(userAddress).toScVal();
+  const idScVal = nativeToScVal(reserveTokenId, { type: "u32" });
+  const r = await simulateContractCall(poolContractId, "get_user_emissions", [userScVal, idScVal]);
+  // simulateContractCall returns an xdr.ScVal. This used to be checked for
+  // `typeof === "bigint"` / `.accrued` without decoding, which never matched,
+  // so pending BLND was always 0.
+  return r ? scValToNative(r) : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -211,6 +220,66 @@ function protocolToUnderlying(protocolAmount, rate, decimals = 7) {
     return (Number(protocolAmount) * Number(rate)) /
       (10 ** BLEND_V2_RATE_SCALAR_DECIMALS) / (10 ** decimals);
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLND emissions math
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// A port of blend-contracts-v2 pool/src/emissions/distributor.rs
+// (update_emission_data + update_user_emissions, as run by `claim`), integer
+// for integer: given the same state and time, it returns what `claim` would.
+// (The time used is the server clock, within seconds of ledger time.) Inputs
+// are i128/u64 values as returned by scValToNative; all maths is BigInt and
+// every division floors, as the contract's fixed_mul_floor / fixed_div_floor do.
+//
+// Why not simulate `claim` instead? Its answer depends on the backstop, not on
+// what the user is owed: claim pays out of a BLND allowance the backstop gives
+// each pool, which runs down as users claim and expires ~120 days after the
+// last emissions top-up (on mainnet, around ledger 66.2M: early January 2027).
+// Past that, every simulated claim fails while the BLND is still owed.
+
+/**
+ * The reserve token's emission index brought forward to `nowSec`.
+ * `supply` is the reserve's d_supply (borrow side) or b_supply (supply side).
+ */
+function currentEmissionIndex(reserveEmissions, supply, supplyScalar, nowSec) {
+  let index = BigInt(reserveEmissions.index);
+  const lastTime = BigInt(reserveEmissions.last_time);
+  const expiration = BigInt(reserveEmissions.expiration);
+  const eps = BigInt(reserveEmissions.eps);
+  const now = BigInt(nowSec);
+  supply = BigInt(supply);
+  // The contract's own "nothing to add" cases, plus now < last_time, which
+  // can only happen here (our clock vs the ledger's) and must not go negative.
+  if (lastTime >= expiration || now <= lastTime || eps === 0n || supply === 0n) return index;
+  const until = now > expiration ? expiration : now;
+  index += ((until - lastTime) * eps * BigInt(supplyScalar)) / supply;
+  return index;
+}
+
+/**
+ * BLND (in stroops, 7 decimals) the user is owed on one reserve token: what
+ * `claim` would pay, as long as the pool's BLND allowance covers it.
+ * `reserveEmissions` null → that side never had emissions → 0.
+ * `userEmissions` null → the user has never been checkpointed on that side,
+ * so a non-zero balance is due the whole index (it predates emissions).
+ */
+function claimableEmissions({ reserveEmissions, userEmissions, balance, supply, supplyScalar, nowSec }) {
+  if (!reserveEmissions) return 0n;
+  balance = BigInt(balance);
+  const scalar = BigInt(supplyScalar);
+  const index = currentEmissionIndex(reserveEmissions, supply, scalar, nowSec);
+  const denominator = scalar * BigInt(SCALAR_7);
+  if (userEmissions) {
+    let accrued = BigInt(userEmissions.accrued);
+    const delta = index - BigInt(userEmissions.index);
+    // delta < 0 only if the two reads straddled a ledger in which the user
+    // acted; the contract would never see that, so count nothing extra.
+    if (balance !== 0n && delta > 0n) accrued += (balance * delta) / denominator;
+    return accrued;
+  }
+  return balance > 0n ? (balance * index) / denominator : 0n;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -325,6 +394,157 @@ async function _resolveAssetMetadata(assetAddress) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Pending BLND
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Pending BLND is a side figure, so it is looked up per pool in the background
+// while the positions are built, and must never cost the adapter its timeout
+// (server.js gives every adapter ADAPTER_TIMEOUT_MS). Once the positions are
+// ready, getPositions waits at most PENDING_BLND_GRACE_MS for it, and never
+// past ADAPTER_TIMEOUT_MS - PENDING_BLND_MARGIN_MS from its start; whatever
+// has not arrived by then is reported as unknown, and the lookup is stopped.
+
+// Reserve emission data is pool-wide, so wallets share it for a few minutes.
+// (A user checkpoint newer than the cached copy forces a fresh read.)
+const RESERVE_EMISSIONS_TTL_MS = 5 * 60 * 1000;
+const EMISSIONS_LOOKUP_CONCURRENCY = 4; // per pool
+const PENDING_BLND_GRACE_MS = 1500;
+const PENDING_BLND_MARGIN_MS = 750;
+// server.js applies the same variable, with the same default, to every adapter.
+const ADAPTER_TIMEOUT_MS = parseInt(process.env.ADAPTER_TIMEOUT_MS || "8000", 10);
+// A shared read that never settles must not leave a pool unknown for every
+// wallet until the TTL runs out: give up on it (and evict it) after this.
+const RESERVE_EMISSIONS_READ_TIMEOUT_MS = 5000;
+const _reserveEmissionsCache = new Map(); // `${pool}:${reserveTokenId}` → { ts, value: Promise }
+const _pendingLookups = new WeakMap(); // pool group → Promise<Array<bigint|null>>
+
+function _reserveEmissionsCached(poolContractId, reserveTokenId, { fresh = false } = {}) {
+  const key = `${poolContractId}:${reserveTokenId}`;
+  const hit = _reserveEmissionsCache.get(key);
+  if (!fresh && hit && Date.now() - hit.ts < RESERVE_EMISSIONS_TTL_MS) return hit.value;
+  // The promise is cached, so wallets loading at the same time share one read.
+  let timer;
+  const value = Promise.race([
+    getReserveEmissions(poolContractId, reserveTokenId),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("get_reserve_emissions timed out")), RESERVE_EMISSIONS_READ_TIMEOUT_MS);
+      timer.unref?.();
+    }),
+  ]).finally(() => clearTimeout(timer));
+  _reserveEmissionsCache.set(key, { ts: Date.now(), value });
+  value.catch(() => {
+    if (_reserveEmissionsCache.get(key)?.value === value) _reserveEmissionsCache.delete(key);
+  });
+  return value;
+}
+
+async function _mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+/** A user's bToken (collateral + supply) and dToken units on one reserve. */
+function _positionUnits(userPositions, reserveIndex) {
+  const at = (a, b) => BigInt((userPositions[a] || userPositions[b] || {})[reserveIndex] || 0n);
+  return {
+    supply: at("collateral", "Collateral") + at("supply", "Supply"),
+    borrow: at("liabilities", "Liabilities"),
+  };
+}
+
+/**
+ * Claimable BLND for every reserve token id in a pool, as an array indexed
+ * by id: stroops (BigInt), or null where it could not be read. Never rejects.
+ *
+ * Every id is asked, not only the reserves the user holds now: BLND earned
+ * before a borrow was repaid or a supply withdrawn stays claimable until it
+ * is claimed. reserveDataFor(i) is the pool's shared get_reserve read; it is
+ * only needed where the user still has a balance.
+ */
+function _lookupPendingBlnd({ pool, userAddress, reserveCount, userPositions, reserveDataFor, run }) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const ids = Array.from({ length: reserveCount * 2 }, (_, id) => id);
+  return _mapLimit(ids, EMISSIONS_LOOKUP_CONCURRENCY, async (id) => {
+    try {
+      // getPositions stopped waiting (deadline, or a pool failed): stop here.
+      if (run.cancelled) return null;
+      let reserveEmissions = await _reserveEmissionsCached(pool.contractId, id);
+      if (!reserveEmissions) return 0n; // this side never had emissions
+      if (run.cancelled) return null;
+      const userEmissions = await getUserEmissions(pool.contractId, userAddress, id);
+      const reserveIndex = Math.floor(id / 2);
+      const isSupply = id === emissionTokenId.supply(reserveIndex);
+      const units = _positionUnits(userPositions, reserveIndex);
+      const balance = isSupply ? units.supply : units.borrow;
+      if (!userEmissions && balance === 0n) return 0n; // never held this side
+      // A checkpoint newer than our cached reserve data (the user acted since
+      // it was read): read it again. At a zero balance the index is unused.
+      if (balance > 0n && userEmissions && BigInt(userEmissions.index) > BigInt(reserveEmissions.index)) {
+        reserveEmissions = await _reserveEmissionsCached(pool.contractId, id, { fresh: true });
+      }
+      let supply = 0n;
+      let supplyScalar = 1n; // unused at a zero balance
+      if (balance > 0n) {
+        const reserve = await reserveDataFor(reserveIndex);
+        const data = reserve?.data || {};
+        supply = isSupply ? (data.b_supply ?? data.bSupply) : (data.d_supply ?? data.dSupply);
+        // 10^decimals of the reserve asset, as the contract uses it.
+        supplyScalar = reserve?.scalar ??
+          (reserve?.config?.decimals != null ? 10n ** BigInt(reserve.config.decimals) : null);
+        if (supply == null || supplyScalar == null) throw new Error("reserve has no supply/decimals");
+      }
+      return claimableEmissions({ reserveEmissions, userEmissions, balance, supply, supplyScalar, nowSec });
+    } catch (e) {
+      console.warn(
+        `[Blend] pending BLND unavailable pool=${pool.contractId.slice(0, 10)} ` +
+          `reserveTokenId=${id}: ${String(e?.message || e).slice(0, 80)}`
+      );
+      return null;
+    }
+  });
+}
+
+/**
+ * Wait for each group's lookup (until PENDING_BLND_GRACE_MS from now or
+ * `deadlineAt`, whichever is sooner, shared by all pools), then fill in
+ * pendingBlndSupply / pendingBlndBorrow / pendingBlnd on its rows and
+ * totalPendingBlnd on the group, in BLND. null means unknown: never a smaller
+ * number. The pool total includes reserves the user has left.
+ */
+async function _attachPendingBlnd(groups, deadlineAt) {
+  let timer;
+  const waitMs = Math.max(0, Math.min(PENDING_BLND_GRACE_MS, deadlineAt - Date.now()));
+  const deadline = new Promise((resolve) => { timer = setTimeout(resolve, waitMs); });
+  const toBlnd = (v) => (v == null ? null : Number(v) / SCALAR_7);
+  try {
+    await Promise.all(groups.map(async (group) => {
+      const byId = (await Promise.race([_pendingLookups.get(group), deadline])) || null;
+      const at = (id) => (byId ? byId[id] ?? null : null);
+      for (const r of group.rows) {
+        const s = at(emissionTokenId.supply(r.reserveIndex));
+        const b = at(emissionTokenId.borrow(r.reserveIndex));
+        r.pendingBlndSupply = toBlnd(s);
+        r.pendingBlndBorrow = toBlnd(b);
+        r.pendingBlnd = s == null || b == null ? null : toBlnd(s + b);
+      }
+      group.totalPendingBlnd = !byId || byId.some((v) => v == null)
+        ? null
+        : toBlnd(byId.reduce((sum, v) => sum + v, 0n));
+    }));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Position row building
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -386,17 +606,8 @@ async function _buildReserveRow({
   const suppliedUSD = suppliedUnderlying * priceUsd;
   const borrowedUSD = borrowedUnderlying * priceUsd;
 
-  // Pending BLND emissions (best-effort)
-  let pendingEmissions = 0n;
-  try {
-    if (totalSuppliedBToken > 0n) {
-      pendingEmissions += await getUserEmissions(pool.contractId, userAddress, reserveIndex * 2);
-    }
-    if (liabBig > 0n) {
-      pendingEmissions += await getUserEmissions(pool.contractId, userAddress, reserveIndex * 2 + 1);
-    }
-  } catch (_) {}
-  const pendingBlnd = Number(pendingEmissions) / SCALAR_7;
+  // Pending BLND is looked up per pool; _attachPendingBlnd fills it in.
+  const pendingBlnd = null;
 
   return {
     reserveIndex, asset: symbol, assetAddress, decimals,
@@ -413,7 +624,7 @@ async function _buildReserveRow({
   };
 }
 
-async function _resolveUserPositionsInPool(pool, userAddress) {
+async function _resolveUserPositionsInPool(pool, userAddress, run) {
   const reserveList = await getReserveList(pool.contractId);
   if (!reserveList || reserveList.length === 0) return null;
 
@@ -421,6 +632,20 @@ async function _resolveUserPositionsInPool(pool, userAddress) {
   if (!userPositions) return null;
 
   const poolConfig = await getPoolConfig(pool.contractId);
+
+  // One get_reserve per reserve, shared by the rows and the pending-BLND lookup.
+  const reserveReads = new Map();
+  const reserveDataFor = (i) => {
+    if (!reserveReads.has(i)) reserveReads.set(i, getReserve(pool.contractId, reserveList[i]));
+    return reserveReads.get(i);
+  };
+  const holdsAny = reserveList.some((_, i) => {
+    const u = _positionUnits(userPositions, i);
+    return u.supply !== 0n || u.borrow !== 0n;
+  });
+  const pendingLookup = holdsAny
+    ? _lookupPendingBlnd({ pool, userAddress, reserveCount: reserveList.length, userPositions, reserveDataFor, run })
+    : null;
 
   const rows = [];
   for (let i = 0; i < reserveList.length; i++) {
@@ -433,7 +658,7 @@ async function _resolveUserPositionsInPool(pool, userAddress) {
 
     // The user HAS a position on this reserve — a failed reserve read here
     // must fail the pool (throw), not skip the row and undercount.
-    const reserveData = await getReserve(pool.contractId, assetAddress);
+    const reserveData = await reserveDataFor(i);
     if (!reserveData) continue;
 
     const row = await _buildReserveRow({
@@ -447,7 +672,7 @@ async function _resolveUserPositionsInPool(pool, userAddress) {
   const totalSuppliedUSD = rows.reduce((s, r) => s + r.suppliedUSD, 0);
   const totalBorrowedUSD = rows.reduce((s, r) => s + r.borrowedUSD, 0);
 
-  return {
+  const group = {
     poolContractId: pool.contractId,
     poolName: pool.name || `Blend Pool (${pool.contractId.slice(0, 6)}…)`,
     rows,
@@ -455,8 +680,10 @@ async function _resolveUserPositionsInPool(pool, userAddress) {
     totalBorrowedUSD,
     netUSD: totalSuppliedUSD - totalBorrowedUSD,
     debtRatio: totalSuppliedUSD > 0 ? totalBorrowedUSD / totalSuppliedUSD : 0,
-    totalPendingBlnd: rows.reduce((s, r) => s + r.pendingBlnd, 0),
+    totalPendingBlnd: null, // filled in by _attachPendingBlnd; null = unknown
   };
+  if (pendingLookup) _pendingLookups.set(group, pendingLookup);
+  return group;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -507,6 +734,8 @@ function _flattenPoolGroup(group) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function getPositions(userAddress) {
+  const startedAt = Date.now();
+  const run = { cancelled: false }; // stops this call's pending-BLND lookups
   _refreshFactoryPools().catch(() => {});
 
   const pools = getConfiguredPools();
@@ -516,10 +745,11 @@ async function getPositions(userAddress) {
   let failedPools = 0;
   for (const pool of pools) {
     try {
-      const group = await _resolveUserPositionsInPool(pool, userAddress);
+      const group = await _resolveUserPositionsInPool(pool, userAddress, run);
       if (group) groups.push(group);
     } catch (e) {
       failedPools++;
+      run.cancelled = true; // this call will throw: its pending-BLND lookups are moot
       console.error(`[Blend] Failed to resolve pool ${pool.contractId}: ${e.message}`);
     }
   }
@@ -533,6 +763,9 @@ async function getPositions(userAddress) {
   if (failedPools > 0) {
     throw new Error(`Blend: ${failedPools}/${pools.length} pools failed to resolve`);
   }
+
+  await _attachPendingBlnd(groups, startedAt + ADAPTER_TIMEOUT_MS - PENDING_BLND_MARGIN_MS);
+  run.cancelled = true; // anything still running has missed its chance
 
   const flat = [];
   for (const g of groups) flat.push(..._flattenPoolGroup(g));
@@ -635,6 +868,10 @@ const BlendAdapter = {
   isConfigured,
   getPositions,
   getPoolsOverview,
+  // Pure emissions maths, exported for tests.
+  claimableEmissions,
+  currentEmissionIndex,
+  _clearEmissionsCache: () => _reserveEmissionsCache.clear(), // tests only
 };
 
 module.exports = BlendAdapter;
