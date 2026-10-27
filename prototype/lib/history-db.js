@@ -110,6 +110,38 @@ function runMigrations(database = db) {
       value TEXT,
       applied_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- DeFi positions per snapshot, in the protocol's own units, for the ones
+    -- that accrue interest through an index (Blend today). Interest between
+    -- two snapshots of the same position is units × (rate₂ − rate₁), which
+    -- the stored values make exact. units/rate are integer strings: the i128
+    -- values overflow a JS number.
+    --
+    -- Unlike token_snapshots this child table has ON DELETE CASCADE, so the
+    -- existing retention and downsample deletes of portfolio_snapshots remove
+    -- these rows too, with no extra statement and no foreign-key failure.
+    CREATE TABLE IF NOT EXISTS defi_position_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      snapshot_id INTEGER NOT NULL
+        REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
+      protocol TEXT NOT NULL,
+      pool_id TEXT,
+      asset_code TEXT,
+      asset_address TEXT,
+      side TEXT NOT NULL CHECK (side IN ('supply', 'borrow')),
+      units_raw TEXT NOT NULL,
+      rate_raw TEXT NOT NULL,
+      rate_decimals INTEGER NOT NULL,
+      asset_decimals INTEGER NOT NULL,
+      underlying REAL,
+      value_usd REAL,
+      price_usd REAL,
+      pending_rewards REAL,
+      reward_asset TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_defi_position_snapshots_id
+      ON defi_position_snapshots(snapshot_id);
   `);
 }
 
@@ -221,6 +253,29 @@ const stmts = {
       (snapshot_id, asset_code, asset_issuer, contract_id, balance, value_usd, price_usd)
     VALUES
       (@snapshotId, @assetCode, @assetIssuer, @contractId, @balance, @valueUSD, @priceUSD)
+  `),
+
+  insertDefiPositionSnapshot: db.prepare(`
+    INSERT INTO defi_position_snapshots
+      (snapshot_id, protocol, pool_id, asset_code, asset_address, side,
+       units_raw, rate_raw, rate_decimals, asset_decimals,
+       underlying, value_usd, price_usd, pending_rewards, reward_asset)
+    VALUES
+      (@snapshotId, @protocol, @poolId, @assetCode, @assetAddress, @side,
+       @unitsRaw, @rateRaw, @rateDecimals, @assetDecimals,
+       @underlying, @valueUSD, @priceUSD, @pendingRewards, @rewardAsset)
+  `),
+
+  getDefiPositionHistory: db.prepare(`
+    SELECT
+      ps.snapshot_at, dps.protocol, dps.pool_id, dps.asset_code, dps.asset_address,
+      dps.side, dps.units_raw, dps.rate_raw, dps.rate_decimals, dps.asset_decimals,
+      dps.underlying, dps.value_usd, dps.price_usd, dps.pending_rewards, dps.reward_asset
+    FROM defi_position_snapshots dps
+    JOIN portfolio_snapshots ps ON dps.snapshot_id = ps.id
+    WHERE ps.address = ? AND ps.network = ?
+      AND ps.snapshot_at >= datetime('now', ?)
+    ORDER BY ps.snapshot_at ASC, dps.id ASC
   `),
 
   updateLastSnapshot: db.prepare(`
@@ -433,8 +488,58 @@ function recordSnapshot(portfolioData, network = "mainnet", { autoTrack = false 
     insertToken(portfolioData.balances);
   }
 
+  // DeFi positions that carry accrual data (see defi_position_snapshots).
+  // A position served from the stale-result cache is skipped: its units and
+  // rate are consistent with each other, but not with this snapshot's time.
+  // Malformed accrual data is skipped rather than allowed to throw: a failed
+  // insert here would leave this snapshot without updateLastSnapshot, and the
+  // scheduler would then retry the wallet on every tick.
+  const INT = /^-?\d+$/;
+  const accruing = (portfolioData.defiPositions || []).filter((p) => {
+    if (!p || !p.accrual || p.stale) return false;
+    const a = p.accrual;
+    const ok = INT.test(String(a.units)) && INT.test(String(a.rate)) && Number.isInteger(Number(a.rateDecimals));
+    if (!ok) console.warn(`[history-db] Skipping malformed accrual data from ${p.protocol || "an adapter"}`);
+    return ok;
+  });
+  if (accruing.length) {
+    const insertDefi = db.transaction((positions) => {
+      for (const p of positions) {
+        stmts.insertDefiPositionSnapshot.run({
+          snapshotId: Number(snapshotId),
+          protocol: String(p.protocol || "unknown"),
+          poolId: p.poolContractId || null,
+          assetCode: p.asset || null,
+          assetAddress: p.assetAddress || null,
+          side: p.accrual.side === "borrow" || p.accrual.side === "supply"
+            ? p.accrual.side
+            : p.valueUSD < 0 || p.subtype === "liability" ? "borrow" : "supply",
+          unitsRaw: String(p.accrual.units),
+          rateRaw: String(p.accrual.rate),
+          rateDecimals: Number(p.accrual.rateDecimals),
+          assetDecimals: Number.isInteger(Number(p.decimals)) ? Number(p.decimals) : 7,
+          underlying: Number(p.underlyingAmount) || 0,
+          valueUSD: Number(p.valueUSD) || 0,
+          priceUSD: p.price?.usd ?? null,
+          pendingRewards: p.accrual.pendingRewards ?? null,
+          rewardAsset: p.accrual.rewardAsset || null,
+        });
+      }
+    });
+    insertDefi(accruing);
+  }
+
   stmts.updateLastSnapshot.run(address);
   return snapshotId;
+}
+
+/**
+ * Accrual rows for one wallet, oldest first, joined to their snapshot time.
+ * Same ranges as getHistory.
+ */
+function getDefiPositionHistory(address, network = "mainnet", range = "30d") {
+  const rangeMap = { "24h": "-1 day", "7d": "-7 days", "30d": "-30 days", "90d": "-90 days", "1y": "-365 days", all: "-100 years" };
+  return stmts.getDefiPositionHistory.all(address, network, rangeMap[range] || "-30 days");
 }
 
 /**
@@ -652,6 +757,7 @@ module.exports = {
   isTracked,
   getTrackedWallets,
   recordSnapshot,
+  getDefiPositionHistory,
   getHistory,
   getTokenHistory,
   getLatestSnapshot,

@@ -398,6 +398,22 @@ async function _buildReserveRow({
   } catch (_) {}
   const pendingBlnd = Number(pendingEmissions) / SCALAR_7;
 
+  // What interest accrual needs, in Blend's own units: the position's
+  // bTokens/dTokens and the reserve's b_rate/d_rate at this moment.
+  // underlying = units × rate / 10^12 / 10^decimals, so between two snapshots
+  // with unchanged units, interest = units × (rate₂ − rate₁) exactly. Kept as
+  // integer strings: i128 values overflow a JS number, and BigInt does not
+  // survive JSON. (Pending BLND is deliberately not included yet: see the
+  // PR description; getUserEmissions does not decode its result.)
+  const accrual = (side, units, rate) => {
+    if (units <= 0n || rate == null) return null;
+    try {
+      return { side, units: units.toString(), rate: BigInt(rate).toString(), rateDecimals: BLEND_V2_RATE_SCALAR_DECIMALS };
+    } catch (_) {
+      return null; // an unexpected rate shape must not take the whole adapter down
+    }
+  };
+
   return {
     reserveIndex, asset: symbol, assetAddress, decimals,
     supplied: suppliedUnderlying,
@@ -410,6 +426,8 @@ async function _buildReserveRow({
     price: price ? { usd: price.usd, source: price.source } : null,
     utilization,
     pendingBlnd,
+    supplyAccrual: accrual("supply", totalSuppliedBToken, bRate),
+    borrowAccrual: accrual("borrow", liabBig, dRate),
   };
 }
 
@@ -480,6 +498,7 @@ function _flattenPoolGroup(group) {
         valueUSD: r.suppliedUSD,
         apy: r.supplyApy,
         price: r.price,
+        accrual: r.supplyAccrual || null,
       });
     }
     if (r.borrowedUSD !== 0) {
@@ -496,6 +515,7 @@ function _flattenPoolGroup(group) {
         valueUSD: -r.borrowedUSD,
         apy: r.borrowApy,
         price: r.price,
+        accrual: r.borrowAccrual || null,
       });
     }
   }
