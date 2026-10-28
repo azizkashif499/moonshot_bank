@@ -92,7 +92,9 @@ test("a Soroban token: stale for up to 15 minutes, then the aggregator, else unp
   t.mock.timers.setTime(T0 + 80 * MIN);
   assert.equal(await pricing.priceSorobanToken(SOLVBTC), null, "no other source: unpriced, not frozen");
 
+  // Once another source has a price, a later lookup finds it. (Six minutes
+  // on, so this holds even when "no price" answers are cached for a while.)
   aggregatorAnswer = { usd: 103_500, change24h: 0, source: "soroswap-aggregator" };
-  t.mock.timers.setTime(T0 + 82 * MIN);
+  t.mock.timers.setTime(T0 + 86 * MIN);
   assert.equal((await pricing.priceSorobanToken(SOLVBTC)).source, "soroswap-aggregator");
 });
