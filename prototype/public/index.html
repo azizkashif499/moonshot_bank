@@ -6901,7 +6901,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
 
           html += `<td class="right">`;
           if (row.supplied > 0) {
-            html += `${fmt(row.supplied, 2)} ${escapeHtml(row.asset)}<br><span class="muted">${fmtUSD(row.suppliedUSD)}</span>`;
+            html += `${fmt(row.supplied, 2)} ${escapeHtml(row.asset)}<br>${row.price == null ? '<span class="unpriced">No price</span>' : `<span class="muted">${fmtUSD(row.suppliedUSD)}</span>`}`;
           } else {
             html += `<span class="muted">—</span>`;
           }
@@ -6909,7 +6909,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
 
           html += `<td class="right">`;
           if (row.borrowed > 0) {
-            html += `<span class="negative">${fmt(row.borrowed, 2)} ${escapeHtml(row.asset)}</span><br><span class="muted">${fmtUSD(row.borrowedUSD)}</span>`;
+            html += `<span class="negative">${fmt(row.borrowed, 2)} ${escapeHtml(row.asset)}</span><br>${row.price == null ? '<span class="unpriced">No price</span>' : `<span class="muted">${fmtUSD(row.borrowedUSD)}</span>`}`;
           } else {
             html += `<span class="muted">—</span>`;
           }
@@ -6931,7 +6931,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           }
           html += `</td>`;
 
-          html += `<td class="right ${row.netUSD < 0 ? "negative" : ""}">${fmtUSD(row.netUSD)}</td>`;
+          html += row.price == null
+            ? `<td class="right"><span class="unpriced">No price</span></td>`
+            : `<td class="right ${row.netUSD < 0 ? "negative" : ""}">${fmtUSD(row.netUSD)}</td>`;
           html += `</tr>`;
         }
         html += `</tbody></table>`;
@@ -6939,6 +6941,12 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         const footerLeft = [];
         if (group.totalBorrowedUSD > 0) {
           footerLeft.push(`<span>Debt ratio: <strong style="${debtRatioColor}">${fmt(debtRatioPct, 1)}%</strong></span>`);
+        }
+        // Positions in an asset with no price aren't in the pool's (or the
+        // wallet's) USD totals; say so rather than leave the totals looking whole.
+        const unpricedRows = group.rows.filter(r => r.price == null && (r.supplied > 0 || r.borrowed > 0)).length;
+        if (unpricedRows > 0) {
+          footerLeft.push(`<span class="unpriced">${unpricedRows} ${unpricedRows === 1 ? "asset has" : "assets have"} no price and ${unpricedRows === 1 ? "is" : "are"} not in the totals</span>`);
         }
         const footerRight = [];
         if (group.totalPendingBlnd > 0) {
