@@ -6044,9 +6044,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           <div class="stat-card">
             <div class="stat-label">XLM Price</div>
             <div class="stat-value">$${fmt(d.xlmPrice?.usd || 0, 4)}</div>
-            <div class="stat-sub" style="color: ${(d.xlmPrice?.change24h || 0) >= 0 ? "var(--green)" : "var(--red)"}">
+            ${d.xlmPrice?.change24hKnown === false ? "" : `<div class="stat-sub" style="color: ${(d.xlmPrice?.change24h || 0) >= 0 ? "var(--green)" : "var(--red)"}">
               ${(d.xlmPrice?.change24h || 0) >= 0 ? "+" : ""}${fmt(d.xlmPrice?.change24h || 0)}%
-            </div>
+            </div>`}
           </div>
         </div>
 
@@ -6648,9 +6648,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           <div>
             <div class="portfolio-address">${d.address}</div>
             <div class="portfolio-value">${fmtBigUSD(d.totalValueUSD)}</div>
-            <div class="portfolio-change ${d.xlmPrice.change24h >= 0 ? "positive" : "negative"}">
+            ${d.xlmPrice.change24hKnown === false ? "" : `<div class="portfolio-change ${d.xlmPrice.change24h >= 0 ? "positive" : "negative"}">
               XLM ${d.xlmPrice.change24h >= 0 ? "+" : ""}${fmt(d.xlmPrice.change24h)}% (24h)
-            </div>
+            </div>`}
             <div class="portfolio-meta">
               <div class="meta-item">Assets: <span>${d.balanceCount}</span></div>
               <div class="meta-item">Subentries: <span>${d.subentryCount}</span></div>
@@ -6672,9 +6672,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           <div class="stat-card">
             <div class="stat-label">XLM Price</div>
             <div class="stat-value">$${fmt(d.xlmPrice.usd, 4)}</div>
-            <div class="stat-sub" style="color: ${d.xlmPrice.change24h >= 0 ? "var(--green)" : "var(--red)"}">
+            ${d.xlmPrice.change24hKnown === false ? "" : `<div class="stat-sub" style="color: ${d.xlmPrice.change24h >= 0 ? "var(--green)" : "var(--red)"}">
               ${d.xlmPrice.change24h >= 0 ? "+" : ""}${fmt(d.xlmPrice.change24h)}%
-            </div>
+            </div>`}
           </div>
           <div class="stat-card">
             <div class="stat-label">Token Types</div>
