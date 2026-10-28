@@ -45,6 +45,16 @@ const cache = new Map(); // key → { price, ts }; price null = "no price found"
 // ~8 seconds a large Blend wallet took, against an 8-second adapter timeout.
 const UNPRICED_TTL_MS = 5 * 60 * 1000;
 
+// Except when CoinGecko is why there is no price. Its free tier rate-limits
+// shared IPs, so a token CoinGecko does price can come back empty for a
+// moment; remembering that kept e.g. Blend's EURC at "No price" (and out of
+// every total) for 5 minutes after CoinGecko answered again. Each pricing
+// run notes whether a CoinGecko lookup for it came back empty (set in
+// _coingeckoPrice, so every layer that asks CoinGecko is covered), and such
+// a "no price" is not cached at all: the next load asks again.
+const { AsyncLocalStorage } = require("async_hooks");
+const pricingRun = new AsyncLocalStorage();
+
 /** The cached price (null = known to have none), or undefined if not cached. */
 function _cacheGet(key) {
   const hit = cache.get(key);
@@ -57,6 +67,7 @@ function _cacheGet(key) {
   return hit.price;
 }
 function _cacheSet(key, price) {
+  if (price == null && pricingRun.getStore()?.coingeckoMissed) return; // see pricingRun
   cache.set(key, { price, ts: Date.now() });
 }
 
@@ -65,7 +76,7 @@ function _cacheSet(key, price) {
 const inFlight = new Map();
 async function _dedup(key, fn) {
   if (inFlight.has(key)) return inFlight.get(key);
-  const p = fn().finally(() => inFlight.delete(key));
+  const p = pricingRun.run({ coingeckoMissed: false }, fn).finally(() => inFlight.delete(key));
   inFlight.set(key, p);
   return p;
 }
@@ -87,6 +98,14 @@ const CG_BATCH_WINDOW_MS = 25;
 
 function _coingeckoPrice(coingeckoId) {
   if (!coingeckoId) return Promise.resolve(null);
+  return _coingeckoBatched(coingeckoId).then((r) => {
+    const run = pricingRun.getStore();
+    if (!r && run) run.coingeckoMissed = true;
+    return r;
+  });
+}
+
+function _coingeckoBatched(coingeckoId) {
   const hit = cgPriceCache.get(coingeckoId);
   if (hit && Date.now() - hit.ts < PRICE_TTL_MS) return Promise.resolve(hit);
   return new Promise((resolve) => {

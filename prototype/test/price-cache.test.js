@@ -22,8 +22,22 @@ let aggregatorAnswer = null;
 aggregator.priceSorobanTokenInUSD = async () => { aggregatorCalls++; return aggregatorAnswer; };
 aggregator.priceClassicAssetViaSACInUSD = async () => { aggregatorCalls++; return aggregatorAnswer; };
 const realFetch = global.fetch;
-test.before(() => { global.fetch = async () => ({ ok: false, status: 503, json: async () => ({}) }); });
-test.after(() => { global.fetch = realFetch; });
+let coingeckoUp = false; // CoinGecko answers /simple/price only when true
+// The CoinGecko micro-batch timer is unref()'d; keep the process alive while a test awaits it.
+let keepAlive;
+test.before(() => {
+  keepAlive = setInterval(() => {}, 1000);
+  global.fetch = async (url) => {
+    if (coingeckoUp && String(url).includes("/simple/price")) {
+      return { ok: true, status: 200, json: async () => ({ "paypal-usd": { usd: 0.9998, usd_24h_change: 0 } }) };
+    }
+    return { ok: false, status: 503, json: async () => ({}) };
+  };
+});
+test.after(() => {
+  global.fetch = realFetch;
+  clearInterval(keepAlive);
+});
 
 const pricing = require("../lib/pricing-engine");
 
@@ -34,6 +48,7 @@ const randomContract = () => StrKey.encodeContract(crypto.randomBytes(32));
 test.beforeEach(() => {
   aggregatorCalls = 0;
   aggregatorAnswer = null;
+  coingeckoUp = false;
 });
 
 test("a Soroban token with no price is asked about once per 5 minutes, not on every load", async (t) => {
@@ -72,4 +87,15 @@ test("a price found is still only kept for a minute", async (t) => {
   t.mock.timers.setTime(T0 + 120 * MIN + 61_000);
   await pricing.priceSorobanToken(token);
   assert.equal(aggregatorCalls, 2, "asked again after it");
+});
+
+test("a token CoinGecko prices isn't stuck at no price when CoinGecko fails once", async (t) => {
+  // CoinGecko's free tier rate-limits shared IPs. A "no price" caused by that
+  // must not be remembered for 5 minutes: the next load asks again.
+  t.mock.timers.enable({ apis: ["Date"], now: T0 + 180 * MIN });
+  const PYUSD = "CCCRWH6Q3FNP3I2I57BDLM5AFAT7O6OF6GKQOC6SSJNDAVRZ57SPHGU2"; // CoinGecko's paypal-usd contract
+  assert.equal(await pricing.priceSorobanToken(PYUSD), null, "CoinGecko down, nothing else prices it");
+  coingeckoUp = true;
+  t.mock.timers.setTime(T0 + 180 * MIN + 10_000);
+  assert.equal((await pricing.priceSorobanToken(PYUSD))?.usd, 0.9998, "asked again on the next load");
 });
