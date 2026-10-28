@@ -75,6 +75,11 @@ const cgPriceCache = new Map(); // coingeckoId → { usd, change24h, ts }
 let cgBatchQueue = new Map(); // coingeckoId → [resolve, ...]
 let cgBatchTimer = null;
 const CG_BATCH_WINDOW_MS = 25;
+// When CoinGecko fails, its last price for an id is served for at most this
+// long (marked stale); after that the asset falls through to the next layer
+// (SDEX, the aggregator) or goes unpriced. A silently frozen price is how
+// the old Freighter XLM feed went wrong for weeks.
+const CG_MAX_STALE_MS = 15 * 60 * 1000;
 
 function _coingeckoPrice(coingeckoId) {
   if (!coingeckoId) return Promise.resolve(null);
@@ -114,11 +119,18 @@ async function _flushCoingeckoBatch() {
       out = { usd: entry.usd, change24h: entry.usd_24h_change || 0, ts: Date.now() };
       cgPriceCache.set(id, out);
     } else {
-      // Stale price is much better than zeroing out a position.
-      out = cgPriceCache.get(id) || null;
+      // A recent price is much better than zeroing out a position, but it
+      // says it is stale, and it isn't served forever (CG_MAX_STALE_MS).
+      const last = cgPriceCache.get(id);
+      out = last && Date.now() - last.ts <= CG_MAX_STALE_MS ? { ...last, stale: true } : null;
     }
     for (const resolve of resolvers) resolve(out);
   }
+}
+
+// A stale CoinGecko price carries stale: true and the time it was fetched.
+function _staleFields(cg) {
+  return cg.stale ? { stale: true, asOf: cg.ts } : {};
 }
 
 // ── Cache priming ────────────────────────────────────────────────────────────
@@ -191,7 +203,7 @@ async function priceClassicAsset(ctx, code, issuer) {
     if (cgId) {
       const cg = await _coingeckoPrice(cgId);
       if (cg) {
-        const p = { usd: cg.usd, change24h: cg.change24h, source: "coingecko", confidence: "high" };
+        const p = { usd: cg.usd, change24h: cg.change24h, source: "coingecko", confidence: "high", ..._staleFields(cg) };
         _cacheSet(cacheKey, p);
         return p;
       }
@@ -240,7 +252,7 @@ async function priceSorobanToken(contractId, opts = {}) {
     if (cgId) {
       const cg = await _coingeckoPrice(cgId);
       if (cg) {
-        const p = { usd: cg.usd, change24h: cg.change24h, source: "coingecko", confidence: "high" };
+        const p = { usd: cg.usd, change24h: cg.change24h, source: "coingecko", confidence: "high", ..._staleFields(cg) };
         _cacheSet(cacheKey, p);
         return p;
       }
