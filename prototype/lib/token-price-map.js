@@ -96,6 +96,14 @@ const sorobanMap = new Map();
 const classicMap = new Map();
 // Classic by code only (fallback if issuer doesn't match exactly)
 const classicByCodeOnly = new Map();
+// The longest issuer known for each classicMap key (seeds are truncated to
+// 30 characters; CoinGecko's list has full ones), for strict lookups.
+const classicIssuers = new Map();
+
+function _noteIssuer(key, issuer) {
+  const known = classicIssuers.get(key);
+  if (!known || issuer.length > known.length) classicIssuers.set(key, issuer);
+}
 
 function _seedFromList(list) {
   for (const entry of list) {
@@ -105,6 +113,7 @@ function _seedFromList(list) {
       // Index by code:issuer-prefix (issuer can be partial)
       const issuerPrefix = entry.issuer.slice(0, 12);
       classicMap.set(`${entry.code}:${issuerPrefix}`, entry.coingeckoId);
+      _noteIssuer(`${entry.code}:${issuerPrefix}`, entry.issuer);
       if (!classicByCodeOnly.has(entry.code)) {
         classicByCodeOnly.set(entry.code, entry.coingeckoId);
       }
@@ -142,15 +151,21 @@ function allCoingeckoIds() {
   return [...new Set([...sorobanMap.values(), ...classicMap.values()])];
 }
 
-function lookupClassic(code, issuer) {
+function lookupClassic(code, issuer, { strict = false } = {}) {
   // Try exact code:issuer-prefix
   if (issuer) {
     const prefix = issuer.slice(0, 12);
-    const hit = classicMap.get(`${code}:${prefix}`);
-    if (hit) return hit;
+    const key = `${code}:${prefix}`;
+    const hit = classicMap.get(key);
+    // `strict` checks the issuer against all of it that is known (30+
+    // characters), not just the 12 the key holds: anyone can issue an asset
+    // called EURC, and a vanity issuer sharing Circle's first 12 characters
+    // must not inherit Circle's price either.
+    if (hit && (!strict || issuer.startsWith(classicIssuers.get(key) || "\0"))) return hit;
   }
   // Fall back to code-only (less precise but catches assets where the seed
-  // only has a truncated issuer)
+  // only has a truncated issuer). `strict` skips it.
+  if (strict) return null;
   return classicByCodeOnly.get(code) || null;
 }
 
@@ -190,6 +205,8 @@ async function refreshFromCoinGecko() {
               classicMap.set(key, c.id);
               added++;
             }
+            // Only a full issuer may tighten strict lookups (a short one would loosen them).
+            if (classicMap.get(key) === c.id && issuer.length === 56) _noteIssuer(key, issuer);
             if (!classicByCodeOnly.has(code)) {
               classicByCodeOnly.set(code, c.id);
             }
