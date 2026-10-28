@@ -36,14 +36,23 @@ const STABLECOINS = {
 
 // ── Cache ────────────────────────────────────────────────────────────────────
 
-const cache = new Map(); // key → { price, ts }
+const cache = new Map(); // key → { price, ts }; price null = "no price found"
 
+// "No price" is remembered too, and for longer than a price. Finding none
+// means trying every layer, and the aggregator alone costs four failing RPC
+// calls (about half a second) per token. Before this was cached, a wallet
+// holding a few unpriced tokens paid that on every load: about 3 of the
+// ~8 seconds a large Blend wallet took, against an 8-second adapter timeout.
+const UNPRICED_TTL_MS = 5 * 60 * 1000;
+
+/** The cached price (null = known to have none), or undefined if not cached. */
 function _cacheGet(key) {
   const hit = cache.get(key);
-  if (!hit) return null;
-  if (Date.now() - hit.ts > PRICE_TTL_MS) {
+  if (!hit) return undefined;
+  const ttl = hit.price == null ? UNPRICED_TTL_MS : PRICE_TTL_MS;
+  if (Date.now() - hit.ts > ttl) {
     cache.delete(key);
-    return null;
+    return undefined;
   }
   return hit.price;
 }
@@ -174,7 +183,7 @@ async function primeKnownPrices() {
 async function priceClassicAsset(ctx, code, issuer) {
   const cacheKey = `classic:${code}:${issuer}`;
   const cached = _cacheGet(cacheKey);
-  if (cached) return cached;
+  if (cached !== undefined) return cached;
 
   return _dedup(cacheKey, async () => {
     // Layer 1: stablecoin shortcut
@@ -231,7 +240,7 @@ async function priceSorobanToken(contractId, opts = {}) {
   if (!contractId) return null;
   const cacheKey = `soroban:${contractId}`;
   const cached = _cacheGet(cacheKey);
-  if (cached) return cached;
+  if (cached !== undefined) return cached;
 
   return _dedup(cacheKey, async () => {
     // Layer 2: CoinGecko via price map (using contract ID)
