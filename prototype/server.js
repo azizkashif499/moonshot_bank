@@ -255,62 +255,9 @@ async function collectDefiPositions(address, xlmPrice) {
 const priceCache = new Map();
 const PRICE_TTL = 60_000; // 60 seconds
 
-async function getXLMPrice() {
-  const cached = priceCache.get("XLM");
-  if (cached && Date.now() - cached.ts < PRICE_TTL) return cached.price;
-
-  // Primary: Freighter's token-prices endpoint (purpose-built for Stellar
-  // assets; doesn't rate-limit our Railway IP). Fallback: CoinGecko.
-  try {
-    const res = await fetch("https://freighter-backend-prd.stellar.org/api/v1/token-prices", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tokens: ["XLM"] }),
-    });
-    if (res.ok) {
-      const body = await res.json();
-      const v = body?.data?.XLM;
-      const usd = parseFloat(v?.currentPrice);
-      if (Number.isFinite(usd) && usd > 0) {
-        const change = parseFloat(v?.percentagePriceChange24h);
-        const price = {
-          usd,
-          change24h: Number.isFinite(change) ? change : 0,
-        };
-        priceCache.set("XLM", { price, ts: Date.now() });
-        return price;
-      }
-    }
-  } catch (e) {
-    console.warn("Freighter XLM price failed, falling back to CoinGecko:", e.message);
-  }
-
-  try {
-    const res = await fetch(
-      "https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd&include_24hr_change=true"
-    );
-    const data = await res.json();
-    if (data?.stellar?.usd && data.stellar.usd > 0) {
-      const price = {
-        usd: data.stellar.usd,
-        change24h: data.stellar.usd_24h_change || 0,
-      };
-      priceCache.set("XLM", { price, ts: Date.now() });
-      return price;
-    }
-  } catch (e) {
-    console.error("Failed to fetch XLM price (CoinGecko fallback also failed):", e.message);
-  }
-
-  // Both sources failed. Return the last cached value if we have one,
-  // even if stale — preferable to zero, which cascades into bogus
-  // portfolio totals across every Stellar holding.
-  if (cached) {
-    console.warn("XLM price sources all failed; returning stale cache");
-    return cached.price;
-  }
-  return { usd: 0, change24h: 0 };
-}
+// XLM/USD lives in lib/xlm-price.js: Stellar's own DEX first, then CoinGecko.
+// (It used to come from the Freighter backend, whose feed went stale.)
+const { getXLMPrice } = require("./lib/xlm-price");
 
 async function getAssetPriceViaSDEX(assetCode, assetIssuer) {
   const cacheKey = `${assetCode}:${assetIssuer}`;
@@ -354,7 +301,7 @@ async function getAssetPriceViaSDEX(assetCode, assetIssuer) {
 
     // Seed XLM SAC price so Blend adapter avoids redundant CoinGecko call
     pricingEngine.seedSorobanPrice("CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA", {
-      usd: xlmPrice.usd, change24h: xlmPrice.change24h, source: "coingecko", confidence: "high",
+      usd: xlmPrice.usd, change24h: xlmPrice.change24h, source: xlmPrice.stale ? "stale" : xlmPrice.source, confidence: "high",
     });
     const priceUSD = priceInXLM * xlmPrice.usd;
 
@@ -722,7 +669,12 @@ app.get("/api/v1/account/:address/collectibles", async (req, res) => {
 // Live price ticker — feeds the marquee banner. 30s server-side cache.
 app.get("/api/v1/prices/ticker", async (_req, res) => {
   try {
-    const result = await getTickerPrices();
+    // The same prices the portfolio uses, so the banner can't disagree with it.
+    const result = await getTickerPrices({
+      getXLMPrice,
+      priceClassic: (code, issuer) =>
+        pricingEngine.priceClassicAsset({ priceViaSDEX: getAssetPriceViaSDEX }, code, issuer),
+    });
     res.json(result);
   } catch (e) {
     console.error("Ticker prices fetch error:", e.message);
@@ -1335,7 +1287,7 @@ app.post("/api/v1/portfolio", sameOriginOnly, async (req, res) => {
 
     // Seed XLM SAC price so Blend adapter avoids redundant CoinGecko call
     pricingEngine.seedSorobanPrice("CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA", {
-      usd: xlmPrice.usd, change24h: xlmPrice.change24h, source: "coingecko", confidence: "high",
+      usd: xlmPrice.usd, change24h: xlmPrice.change24h, source: xlmPrice.stale ? "stale" : xlmPrice.source, confidence: "high",
     });
     const walletResults = [];
     let grandTotalUSD = 0;
