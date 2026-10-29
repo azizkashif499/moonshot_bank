@@ -4,7 +4,10 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { app } = require("../server.js");
-const { CSP_DIRECTIVES } = require("../lib/security-headers");
+const { CSP_DIRECTIVES, inlineScriptHashes } = require("../lib/security-headers");
+
+const directive = (csp, name) =>
+  (csp.split(";").map((d) => d.trim()).find((d) => d.startsWith(`${name} `)) || "").split(/\s+/).slice(1);
 
 test("the CSP is present and complete on the SPA", async () => {
   const res = await request(app, "GET", "/");
@@ -16,7 +19,7 @@ test("the CSP is present and complete on the SPA", async () => {
   // renders the app unstyled or blanks the NFTs tab, so check all of them.
   for (const fragment of [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
+    "script-src 'self' 'sha256-",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
     "connect-src 'self'",
@@ -29,6 +32,45 @@ test("the CSP is present and complete on the SPA", async () => {
   ]) {
     assert.ok(csp.includes(fragment), `CSP missing "${fragment}"\ngot: ${csp}`);
   }
+});
+
+test("script-src blocks injected inline script and eval", async () => {
+  // 'unsafe-inline' would let an injected <script> or onclick= run, and
+  // 'unsafe-eval' would let injected strings run through eval/new Function.
+  assert.deepEqual(CSP_DIRECTIVES.scriptSrc.filter((s) => !s.startsWith("'sha256-")), ["'self'"]);
+  // Nor may it come back through script-src-attr / script-src-elem.
+  const res = await request(app, "GET", "/");
+  for (const d of res.headers["content-security-policy"].split(";").map((x) => x.trim())) {
+    if (d.startsWith("script-src")) assert.ok(!/'unsafe-(inline|eval|hashes)'/.test(d), `weakened: ${d}`);
+  }
+});
+
+test("every inline script on every HTML route is allowed by hash", async () => {
+  // A new or edited inline <script> that is not covered would be blocked in
+  // the browser, so check the HTML the server actually sends. The hashes are
+  // computed at boot from public/*.html; /api/docs is generated in code and
+  // must stay script-free.
+  for (const url of ["/", "/p/some-profile", "/privacy.html", "/security.html", "/terms.html", "/api/docs"]) {
+    const res = await request(app, "GET", url);
+    assert.equal(res.status, 200, `${url} -> ${res.status}`);
+    const allowed = directive(res.headers["content-security-policy"], "script-src");
+    const needed = inlineScriptHashes(res.raw);
+    const missing = needed.filter((h) => !allowed.includes(h));
+    assert.deepEqual(missing, [], `${url}: inline script(s) the CSP would block`);
+    if (url === "/") assert.equal(needed.length, 4, "index.html should have 4 inline scripts");
+  }
+});
+
+test("inline-script hashes match what the browser computes, even with CRLF line endings", () => {
+  // The HTML parser turns CRLF into LF before hashing, so a Windows checkout
+  // (core.autocrlf) must hash to the same value as the LF file.
+  const crypto = require("crypto");
+  const lf = "<script>\n  console.log(1);\n</script>";
+  const expected = `'sha256-${crypto.createHash("sha256").update("\n  console.log(1);\n").digest("base64")}'`;
+  assert.deepEqual(inlineScriptHashes(lf), [expected]);
+  assert.deepEqual(inlineScriptHashes(lf.replace(/\n/g, "\r\n")), [expected]);
+  assert.deepEqual(inlineScriptHashes('<script src="/x.js"></script>'), [], "external scripts need no hash");
+  assert.equal(inlineScriptHashes('<script data-src="x">1</script>').length, 1, "data-src is not src");
 });
 
 test("style-src permits inline styles", () => {
