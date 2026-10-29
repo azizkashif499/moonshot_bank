@@ -6835,6 +6835,10 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       const totalBorrowed = byPool.reduce((s, p) => s + (p.totalBorrowedUSD || 0), 0);
       const netDefiUSD = totalSupplied - totalBorrowed;
       const totalPendingBlnd = byPool.reduce((s, p) => s + (p.totalPendingBlnd || 0), 0);
+      // null = a pool's pending BLND could not be read this time. Show "—"
+      // rather than a total that is quietly too small.
+      const pendingBlndUnknown = byPool.some(p => p.totalPendingBlnd === null);
+      const fmtBlnd = (v) => (v > 0 && v < 0.01 ? "<0.01" : fmt(v, 2));
       // Protocols with a byPool group (blend, k2, ...) are already counted in
       // netDefiUSD — their flat positions must be excluded here or the value
       // double-counts. A literal !== "blend" check broke the day K2 became
@@ -6854,8 +6858,10 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         html += `<div class="defi-summary-stat"><div class="label">Supplied</div><div class="value">${fmtUSD(totalSupplied)}</div></div>`;
         html += `<div class="defi-summary-stat"><div class="label">Borrowed</div><div class="value">${fmtUSD(totalBorrowed)}</div></div>`;
         html += `<div class="defi-summary-stat"><div class="label">Net DeFi</div><div class="value ${netDefiTotal < 0 ? "negative" : "positive"}">${fmtUSD(netDefiTotal)}</div></div>`;
-        if (totalPendingBlnd > 0) {
-          html += `<div class="defi-summary-stat"><div class="label">Pending BLND</div><div class="value">${fmt(totalPendingBlnd, 2)}</div></div>`;
+        if (pendingBlndUnknown) {
+          html += `<div class="defi-summary-stat" title="Pending BLND could not be read for every pool. Refresh to try again."><div class="label">Pending BLND</div><div class="value">—</div></div>`;
+        } else if (totalPendingBlnd > 0) {
+          html += `<div class="defi-summary-stat"><div class="label">Pending BLND</div><div class="value">${fmtBlnd(totalPendingBlnd)}</div></div>`;
         }
         html += `</div>`;
       }
@@ -6944,7 +6950,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         }
         const footerRight = [];
         if (group.totalPendingBlnd > 0) {
-          footerRight.push(`<span class="emission-pill">+${fmt(group.totalPendingBlnd, 2)} BLND pending</span>`);
+          footerRight.push(`<span class="emission-pill">+${fmtBlnd(group.totalPendingBlnd)} BLND pending</span>`);
         }
         if (footerLeft.length > 0 || footerRight.length > 0) {
           html += `<div class="defi-pool-footer">`;
