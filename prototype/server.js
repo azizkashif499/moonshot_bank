@@ -8,7 +8,7 @@ const path = require("path");
 const historyDb = require("./lib/history-db");
 const { resolveSorobanTokens, resolveCustomToken, getRegistry } = require("./lib/token-resolver");
 const { discoverSorobanTokens } = require("./lib/contract-discovery");
-const { isKnownSAC, classicForSAC, classicMatches } = require("./lib/sac-mapping");
+const { isKnownSAC, classicForSAC, classicMatches, resolveSacAsset } = require("./lib/sac-mapping");
 const pricingEngine = require("./lib/pricing-engine");
 const SolvProtocolAdapter = require("./lib/adapters/solv-protocol");
 const BlendAdapter = require("./lib/adapters/blend");
@@ -335,12 +335,14 @@ function isStablecoin(code, issuer) {
  * them; the classic-side fetch already finds the underlying. Without filtering,
  * a wallet with 100 native XLM appears as 200 XLM (100 native + 100 SAC).
  *
- * For each discovered token whose contract is a known SAC, we check whether
- * the underlying classic asset is already represented in `balances`. If so,
- * we drop the SAC entry. If the wallet truly holds the SAC version with no
- * classic counterpart (rare but valid), the SAC entry remains.
+ * Every address here is a G-account (discovery refuses anything else), and a
+ * SAC's balance() of a G-account reads its trustline, so a discovered SAC row
+ * is never a holding of its own: it is either the classic balance already in
+ * `balances`, or a stale discovery-cache row for a trustline that is now
+ * empty. Both are dropped. (Before SACs were priced, a stale row was merely
+ * an unpriced line; priced, it would be phantom value.)
  */
-function dedupSACsAgainstClassicBalances(discoveredTokens, classicBalances) {
+async function dedupSACsAgainstClassicBalances(discoveredTokens, classicBalances) {
   if (!Array.isArray(discoveredTokens) || discoveredTokens.length === 0) {
     return discoveredTokens || [];
   }
@@ -367,10 +369,16 @@ function dedupSACsAgainstClassicBalances(discoveredTokens, classicBalances) {
       // Malformed code/issuer — nothing to dedupe against.
     }
   }
-  return discoveredTokens.filter((tok) => {
+  const remaining = discoveredTokens.filter((tok) => {
     const cid = tok && tok.asset && tok.asset.contractId;
     return !cid || !sacIds.has(cid);
   });
+  // Any other SAC (one whose trustline is empty or gone). Checked in
+  // parallel; a row that can't be checked is kept, as before.
+  const isSac = await Promise.all(
+    remaining.map((tok) => (tok && tok.asset && tok.asset.contractId ? resolveSacAsset(tok.asset.contractId) : null))
+  );
+  return remaining.filter((_, i) => !isSac[i]);
 }
 
 // ── API Routes ────────────────────────────────────────────────────────────────
@@ -483,7 +491,7 @@ app.get("/api/v1/account/:address", async (req, res) => {
       // Deduplicate well-known SAC contracts (XLM SAC, USDC SAC) against the
       // classic balances already in `balances` to avoid showing the same
       // economic asset twice.
-      discoveredTokens = dedupSACsAgainstClassicBalances(rawDiscovered, balances);
+      discoveredTokens = await dedupSACsAgainstClassicBalances(rawDiscovered, balances);
       for (const dt of discoveredTokens) {
         totalValueUSD += dt.valueUSD || 0;
         balances.push(dt);
@@ -1365,7 +1373,7 @@ app.post("/api/v1/portfolio", sameOriginOnly, async (req, res) => {
         // lookup included them — the two views never agreed.
         try {
           const registered = await _deps.resolveSorobanTokens(address);
-          const discovered = dedupSACsAgainstClassicBalances(
+          const discovered = await dedupSACsAgainstClassicBalances(
             await _deps.discoverSorobanTokens(address),
             balances
           );
@@ -1927,7 +1935,7 @@ async function fetchPortfolioForScheduler(address) {
   // Auto-discovered Soroban tokens (cached, so usually a no-op in the scheduler loop)
   try {
     const rawDiscovered = await discoverSorobanTokens(address);
-    const discoveredTokens = dedupSACsAgainstClassicBalances(rawDiscovered, balances);
+    const discoveredTokens = await dedupSACsAgainstClassicBalances(rawDiscovered, balances);
     for (const dt of discoveredTokens) {
       totalValueUSD += dt.valueUSD || 0;
       balances.push(dt);
@@ -2042,4 +2050,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, __setTestDeps, assertAdaptersConfigured, PROTOCOL_ADAPTERS };
+module.exports = { app, __setTestDeps, assertAdaptersConfigured, PROTOCOL_ADAPTERS, dedupSACsAgainstClassicBalances };

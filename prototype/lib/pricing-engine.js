@@ -10,6 +10,10 @@
  *   4. Soroswap Aggregator    — via the unified Soroban AMM aggregator
  *   5. Unpriced               — return null, caller renders "No price"
  *
+ * Soroban tokens: the CoinGecko map by contract id; then, for a Stellar Asset
+ * Contract, the stablecoin list and CoinGecko for the classic asset it wraps;
+ * then the Soroswap Aggregator.
+ *
  * Each layer returns a consistent shape so callers don't need to branch:
  *   { usd, change24h, source, confidence?, depthOk?, priceImpact? } | null
  *
@@ -20,6 +24,7 @@
 const StellarSdk = require("@stellar/stellar-sdk");
 const priceMap = require("./token-price-map");
 const aggregator = require("./soroswap-aggregator");
+const sacMapping = require("./sac-mapping");
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -162,6 +167,15 @@ async function primeKnownPrices() {
   return primeInFlight;
 }
 
+// ── Stellar Asset Contracts ──────────────────────────────────────────────────
+//
+// Much of what Soroban protocols hold is a Stellar Asset Contract (SAC): the
+// Soroban face of a classic asset. Blend's reserves include the SACs of EURC,
+// AQUA, CETES, USDGLO and TESOURO. Nothing priced those through their classic
+// asset, so they came back unpriced and their positions dropped out of
+// totals. lib/sac-mapping.js resolveSacAsset() identifies them (verified
+// against the contract id, so a contract can't just claim to be one).
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -243,6 +257,29 @@ async function priceSorobanToken(contractId, opts = {}) {
         const p = { usd: cg.usd, change24h: cg.change24h, source: "coingecko", confidence: "high" };
         _cacheSet(cacheKey, p);
         return p;
+      }
+    }
+
+    // Layer 3: a Stellar Asset Contract takes the stablecoin or CoinGecko
+    // price of the classic asset it wraps, matched strictly on code and
+    // issuer. Not the classic SDEX layer: on thin books it values off the
+    // best bid (e.g. EURx at $0.11, GBPx at $0.29), worse than no price.
+    const classic = await sacMapping.resolveSacAsset(contractId);
+    if (classic) {
+      const stable = STABLECOINS[`${classic.code}:${classic.issuer}`];
+      if (stable !== undefined) {
+        const p = { usd: stable, change24h: 0, source: "stablecoin", confidence: "high" };
+        _cacheSet(cacheKey, p);
+        return p;
+      }
+      const classicCgId = priceMap.lookupClassic(classic.code, classic.issuer, { strict: true });
+      if (classicCgId) {
+        const cg = await _coingeckoPrice(classicCgId);
+        if (cg) {
+          const p = { usd: cg.usd, change24h: cg.change24h, source: "coingecko", confidence: "high" };
+          _cacheSet(cacheKey, p);
+          return p;
+        }
       }
     }
 
