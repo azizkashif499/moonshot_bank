@@ -711,7 +711,13 @@ async function _resolveUserPositionsInPool(pool, userAddress, run) {
 function _flattenPoolGroup(group) {
   const flat = [];
   for (const r of group.rows) {
-    if (r.suppliedUSD !== 0) {
+    // Gate on token amounts, not USD value (as k2.js does). When an asset has
+    // no price (USTRY, oUSD and the Forex coins, for example), its USD value is 0 but
+    // the position — a borrow especially — still exists. Gating on USD made
+    // such positions vanish from the API, the position count and snapshots.
+    // They carry valueUSD 0 and unpriced: true.
+    const unpriced = r.price == null;
+    if (r.supplied > 0) {
       flat.push({
         protocol: "blend",
         type: "lending",
@@ -724,11 +730,12 @@ function _flattenPoolGroup(group) {
         underlyingAmount: r.supplied,
         valueUSD: r.suppliedUSD,
         apy: r.supplyApy,
+        unpriced,
         price: r.price,
         accrual: r.supplyAccrual || null,
       });
     }
-    if (r.borrowedUSD !== 0) {
+    if (r.borrowed > 0) {
       flat.push({
         protocol: "blend",
         type: "borrowing",
@@ -739,8 +746,9 @@ function _flattenPoolGroup(group) {
         assetAddress: r.assetAddress,
         decimals: r.decimals,
         underlyingAmount: r.borrowed,
-        valueUSD: -r.borrowedUSD,
+        valueUSD: r.borrowedUSD ? -r.borrowedUSD : 0, // not -0 when unpriced
         apy: r.borrowApy,
+        unpriced,
         price: r.price,
         accrual: r.borrowAccrual || null,
       });
