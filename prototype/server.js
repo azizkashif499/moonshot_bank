@@ -2082,6 +2082,10 @@ if (require.main === module) {
     console.log(`Stellar Scope API running on http://localhost:${PORT}`);
     console.log(`Dashboard: http://localhost:${PORT}`);
     console.log(`[history-db] Using database at ${historyDb.DB_PATH}`);
+    const { storage, warning } = historyDb.describeStorage();
+    if (warning) {
+      console.warn(`[history-db] WARNING (${storage}): ${warning}`);
+    }
     startBackgroundWork();
   });
 }

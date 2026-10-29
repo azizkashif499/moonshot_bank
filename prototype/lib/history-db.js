@@ -13,6 +13,46 @@ const { cleanLabel } = require("./sanitize");
 
 const DB_PATH = process.env.HISTORY_DB_PATH || path.join(__dirname, "..", "data", "history.db");
 
+/**
+ * Whether the database will survive the next deploy.
+ *
+ * On Railway the container filesystem is replaced on every deploy, so a
+ * database outside the service's volume loses every snapshot and every public
+ * profile. Railway sets RAILWAY_VOLUME_MOUNT_PATH only when a volume is
+ * attached, and RAILWAY_ENVIRONMENT_ID on every deployment, which is enough to
+ * tell the three cases apart without guessing:
+ *
+ *   "volume"     on Railway, and the database file is inside the volume
+ *   "ephemeral"  on Railway, and it is not (no volume, or HISTORY_DB_PATH
+ *                points somewhere else); `warning` says which and what to set
+ *   "local"      not on Railway (local dev, tests); nothing to warn about
+ *
+ * Pure, so the tests can feed it any environment.
+ */
+function describeStorage(dbPath = DB_PATH, env = process.env) {
+  if (!env.RAILWAY_ENVIRONMENT_ID) return { storage: "local", warning: null };
+  const mount = env.RAILWAY_VOLUME_MOUNT_PATH;
+  if (!mount) {
+    return {
+      storage: "ephemeral",
+      warning:
+        "No Railway volume is attached, so the database is on the container " +
+        "filesystem and every snapshot and public profile is deleted on the next " +
+        "deploy. Attach a volume to this service and set HISTORY_DB_PATH to a file " +
+        "inside it (see the HISTORY_DB_PATH note in .env.example).",
+    };
+  }
+  const rel = path.relative(path.resolve(mount), path.resolve(dbPath));
+  if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) return { storage: "volume", warning: null };
+  return {
+    storage: "ephemeral",
+    warning:
+      `A Railway volume is attached at ${mount}, but the database is not inside ` +
+      `it, so it is deleted on the next deploy. Set HISTORY_DB_PATH to a file ` +
+      `under ${mount} (see the HISTORY_DB_PATH note in .env.example).`,
+  };
+}
+
 // Ensure data directory exists
 const fs = require("fs");
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -637,11 +677,14 @@ function getStats() {
     totalSnapshots: snapshotCount,
     dbSizeBytes: dbSize,
     dbSizeMB: (dbSize / 1024 / 1024).toFixed(2),
+    // "volume" | "ephemeral" | "local". A word, not the path: see above.
+    storage: describeStorage().storage,
   };
 }
 
 module.exports = {
   DB_PATH,
+  describeStorage,
   runMigrations,
   runBackfills,
   _backfillHasRun,
