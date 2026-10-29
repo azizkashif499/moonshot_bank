@@ -36,7 +36,7 @@ const COINGECKO_API = "https://api.coingecko.com/api/v3";
 const STABLECOINS = {
   "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN": 1.0,
   "USDC:GDQOE23CFSUMSVQK4Y5JHPPYK73VYCNHZHA7ENKCV37P6SUEO6XQBKPP": 1.0,
-  "yUSDC:GDGTVWSM4MGS4T7Z6W4RPWOCHE2I6FDFDZQI3D2URRQMHI4BSFS7SN2F": 1.0,
+  "yUSDC:GDGTVWSM4MGS4T7Z6W4RPWOCHE2I6RDFCIFZGS3DOA63LWQTRNZNTTFF": 1.0,
 };
 
 // ── Cache ────────────────────────────────────────────────────────────────────
@@ -241,7 +241,11 @@ async function priceClassicAsset(ctx, code, issuer) {
 
     // Layer 2: CoinGecko via price map
     priceMap._maybeRefresh();
-    const cgId = priceMap.lookupClassic(code, issuer);
+    // Strict: only the issuer CoinGecko lists gets its price. Anyone can
+    // issue an asset with any code, and spam issuers do (a wallet holding
+    // 103M fake PYUSD showed as $103M). Those fall through to the market
+    // layers below and get what their own market says.
+    const cgId = priceMap.lookupClassic(code, issuer, { strict: true });
     if (cgId) {
       const cg = await _coingeckoPrice(cgId);
       if (cg) {

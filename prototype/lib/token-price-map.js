@@ -23,7 +23,8 @@ const SEED = [
   { coingeckoId: "eutbl", symbol: "EUTBL", kind: "soroban", contractId: "CBGV2QFQBBGEQRUKUMCPO3SZOHDDYO6SCP5CH6TW7EALKVHCXTMWDDOF" },
   { coingeckoId: "paypal-usd", symbol: "PYUSD", kind: "soroban", contractId: "CCCRWH6Q3FNP3I2I57BDLM5AFAT7O6OF6GKQOC6SSJNDAVRZ57SPHGU2" },
   // PYUSD also exists as a classic trustline issued by PayPal (CoinGecko only lists the Soroban side).
-  { coingeckoId: "paypal-usd", symbol: "PYUSD", kind: "classic", code: "PYUSD", issuer: "GDQE7IGFAOX4PJBPGRTSGE3T5LE7HXNUDA52KNVGMTXVR75DXY67U2V5" },
+  // This is the issuer whose Stellar Asset Contract is the PYUSD contract above.
+  { coingeckoId: "paypal-usd", symbol: "PYUSD", kind: "classic", code: "PYUSD", issuer: "GDQE7IXJ4HUHV6RQHIUPRJSEZE4DRS5WY577O2FY6YQ5LVWZ7JZTU2V5" },
   // USDT0 — Tether's omnichain USDT (LayerZero OFT, Everdawn Labs). Stellar launch Aug 2026.
   { coingeckoId: "usdt0", symbol: "USDT0", kind: "soroban", contractId: "CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF" },
   { coingeckoId: "usdt0", symbol: "USDT0", kind: "classic", code: "USDT0", issuer: "GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q" },
